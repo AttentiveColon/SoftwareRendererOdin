@@ -33,7 +33,7 @@ run :: proc(program : Program)
         program.title,
     )
     defer display.close(d)
-
+    
     r : Renderer = renderer.create(program.render_width, program.render_height)
     defer renderer.close(r)
 

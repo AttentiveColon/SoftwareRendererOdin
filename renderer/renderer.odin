@@ -3,6 +3,8 @@ package renderer
 import "../base"
 import "core:slice"
 import "core:math"
+import "core:thread"
+import "core:os"
 
 Renderer :: struct
 {
@@ -17,11 +19,41 @@ Renderer :: struct
     tile_bins : [][dynamic]base.RasterTriangle,
     textures : [dynamic]base.Texture,
 
-    raster_verticies : [20000]base.RasterVertex,
+    raster_verticies : [dynamic]base.RasterVertex,
     clip_buffer : [15]base.RasterVertex,
     polygon_buffer : [4]base.RasterVertex,
 
     global_light_position : base.V3,
+
+    thread_pool : ^thread.Pool,
+}
+
+Render_Thread :: struct
+{
+    renderer : ^Renderer,
+    index : i32,
+}
+
+render_task :: proc(task : thread.Task)
+{
+    // cast task.data to thread data type
+    data := cast(^Render_Thread)task.data
+    renderer := data.renderer
+    index := data.index
+
+    tile_x_min := (index % renderer.tile_x) * renderer.tile_size
+    tile_x_max := tile_x_min + renderer.tile_size - 1
+    tile_y_min := (index / renderer.tile_x) * renderer.tile_size
+    tile_y_max := tile_y_min + renderer.tile_size - 1
+
+    for j := 0; j < len(renderer.tile_bins[index]); j += 1
+    {
+        draw_triangle_tile(
+            renderer.tile_bins[index][j], 
+            tile_x_min, tile_x_max, 
+            tile_y_min, tile_y_max
+        )
+    }
 }
 
 create :: proc(render_width, render_height : i32) -> Renderer
@@ -34,12 +66,16 @@ create :: proc(render_width, render_height : i32) -> Renderer
     tile_y : i32 = render_height / tile_size
     tile_bins := make([][dynamic]base.RasterTriangle, tile_x * tile_y)
     textures : [dynamic]base.Texture
-    raster_verticies : [20000]base.RasterVertex
+    raster_verticies : [dynamic]base.RasterVertex
     clip_buffer : [15]base.RasterVertex
     polygon_buffer : [4]base.RasterVertex
 
     global_light_position : base.V3 = {15,15,15}
 
+    thread_pool := new(thread.Pool)
+    thread.pool_init(thread_pool, context.allocator, os.get_processor_core_count())
+    thread.pool_start(thread_pool)
+    
     return {
         render_width, 
         render_height, 
@@ -54,6 +90,7 @@ create :: proc(render_width, render_height : i32) -> Renderer
         clip_buffer,
         polygon_buffer,
         global_light_position,
+        thread_pool,
     }
 }
 
@@ -108,7 +145,13 @@ begin_draw :: proc(renderer : ^Renderer)
 
 end_draw :: proc(renderer : ^Renderer)
 {
-
+    task_data := make([]Render_Thread, len(renderer.tile_bins), context.temp_allocator)
+    for _, index in renderer.tile_bins
+    {
+        task_data[index] = Render_Thread{renderer, i32(index)}
+        thread.pool_add_task(renderer.thread_pool, context.allocator, render_task, rawptr(&task_data[index]))
+    }
+    thread.pool_finish(renderer.thread_pool)
 }
 
 update_light_position :: proc(renderer : ^Renderer, position : base.V3)
@@ -134,4 +177,15 @@ get_framebuffer :: proc(renderer : Renderer) -> []u32
 close :: proc(renderer : Renderer)
 {
     delete(renderer.framebuffer)
+    delete(renderer.depthbuffer)
+    delete(renderer.raster_verticies)
+    delete(renderer.textures)
+    for bin in renderer.tile_bins
+    {
+        delete(bin)
+    }
+    delete(renderer.tile_bins)
+    thread.pool_finish(renderer.thread_pool)
+    thread.pool_destroy(renderer.thread_pool)
+    free(renderer.thread_pool)
 }

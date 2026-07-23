@@ -85,3 +85,11 @@ Mesh :: struct
     materials : map[string]Material,
     face_groups : []FaceGroup,
 }
+
+RasterVertex :: struct
+{
+    position : V4,
+    light_color : Color,
+    normal : V3,
+    uv : V2,
+}

@@ -49,6 +49,7 @@ render_task :: proc(task : thread.Task)
     for j := 0; j < len(renderer.tile_bins[index]); j += 1
     {
         draw_triangle_tile(
+            renderer,
             renderer.tile_bins[index][j], 
             tile_x_min, tile_x_max, 
             tile_y_min, tile_y_max
@@ -99,9 +100,87 @@ total_area :: proc(a, b, c : base.ScreenCoord) -> f32
     return f32((b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x))
 }
 
-draw_triangle_tile :: proc(tri : base.RasterTriangle, tile_x_min, tile_x_max, tile_y_min, tile_y_max : i32)
+draw_triangle_tile :: proc(renderer : ^Renderer, tri : base.RasterTriangle, tile_x_min, tile_x_max, tile_y_min, tile_y_max : i32)
 {
+    tex := renderer.textures[tri.texture_index]
+    area := tri.area
+    render_width : int = int(renderer.render_width)
+    render_height : int = int(renderer.render_height)
 
+    // triangle bounds
+    x_min := math.min(math.min(tri.s0.x, tri.s1.x), tri.s2.x)
+    x_max := math.max(math.max(tri.s0.x, tri.s1.x), tri.s2.x)
+    y_min := math.min(math.min(tri.s0.y, tri.s1.y), tri.s2.y)
+    y_max := math.max(math.max(tri.s0.y, tri.s1.y), tri.s2.y)
+
+    // clamp bounds to avoid index out of bounds crash
+    x_min = math.max(0, x_min)
+    x_max = math.min(int(render_width) - 1, x_max)
+    y_min = math.max(0, y_min)
+    y_max = math.min(int(render_height) - 1, y_max)
+    x_min = math.max(int(tile_x_min), x_min)
+    x_max = math.min(int(tile_x_max), x_max)
+    y_min = math.max(int(tile_y_min), y_min)
+    y_max = math.min(int(tile_y_max), y_max)
+
+    // barycentric coordinates stepwise value
+    alpha_step_x := f32(tri.s1.y - tri.s2.y) / area
+    alpha_step_y:=  f32(tri.s2.x - tri.s1.x) / area
+    beta_step_x :=  f32(tri.s2.y - tri.s0.y) / area
+    beta_step_y :=  f32(tri.s0.x - tri.s2.x) / area
+    gamma_step_x := f32(tri.s0.y - tri.s1.y) / area
+    gamma_step_y := f32(tri.s1.x - tri.s0.x) / area
+
+    // get starting coordinate at top left of bounding box
+    start_p := base.ScreenCoord{x_min, y_min}
+    start_alpha := total_area(start_p, tri.s1, tri.s2)    
+    start_beta := total_area(start_p, tri.s2, tri.s0)
+    start_gamma := total_area(start_p, tri.s0, tri.s1)
+
+    row_alpha, row_beta, row_gamma : f32 = start_alpha, start_beta, start_gamma
+
+    z0, z1, z2 : f32 = tri.f0.z, tri.f1.z, tri.f2.z
+    c0, c1, c2 : base.Color = tri.f0.c, tri.f1.c, tri.f2.c
+    u0, u1, u2 : f32 = tri.f0.uv.x, tri.f1.uv.x, tri.f2.uv.x
+    v0, v1, v2 : f32 = tri.f0.uv.y, tri.f1.uv.y, tri.f2.uv.y
+
+    epsilon : f32 = -0.0001
+    for y := y_min; y <= y_max; y+=1
+    {
+        alpha, beta, gamma : f32 = row_alpha, row_beta, row_gamma
+        row_offset : int = y * render_width
+        for x := x_min; x <= x_max; x+=1
+        {
+            if alpha >= epsilon && beta >= epsilon && gamma >= epsilon
+            {
+                pixel_depth : f32 = (z0 * alpha) + (z1 * beta) + (z2 * gamma)
+                buffer_index : int = row_offset + x
+
+                if pixel_depth < renderer.depthbuffer[buffer_index]
+                {
+                    renderer.depthbuffer[buffer_index] = pixel_depth
+                    light_color : base.Color = (c0 * alpha) + (c1 * beta) + (c2 * gamma)
+
+                    // interpolate uvs and sample
+                    uvx : f32 = (u0 * alpha) + (u1 * beta) + (u0 * gamma)
+                    uvy : f32 = (v0 * alpha) + (v1 * beta) + (v2 * gamma)
+                    sample : base.Color = base.sample_texture(tex, uvx, uvy)
+
+                    // combine and write to buffer
+                    final_color : base.Color = sample * light_color
+                    renderer.framebuffer[buffer_index] = base.to_uint32_color(final_color)
+                }
+            }
+            // step one pixel to the right
+            alpha += alpha_step_x
+            beta += beta_step_x
+            gamma += gamma_step_x
+        }
+        // step one pixel row down
+        row_alpha += alpha_step_y
+        row_beta += beta_step_y
+        row_gamma += gamma_step_y
+    }
 }
 
 get_point_from_position :: proc(renderer: Renderer, x, y, z : f32, c : base.Color, normal : base.V3, uv : base.V2) -> base.Point

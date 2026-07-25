@@ -6,6 +6,7 @@ import "core:math"
 
 Texture :: struct
 {
+    name : cstring,
     width, height : i32,
     pixels : []V4
 }
@@ -23,7 +24,7 @@ load_texture :: proc(filepath : cstring) -> Texture
     raylib_slice := img_ptr[:total_pixels]
     odin_slice := make([][4]f32, total_pixels)
     copy(odin_slice,  raylib_slice)
-    return {image.width, image.height, odin_slice}
+    return {filepath, image.width, image.height, odin_slice}
 }
 
 unload_texture :: proc(texture : ^Texture)

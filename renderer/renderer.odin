@@ -6,6 +6,9 @@ import "core:math"
 import "core:thread"
 import "core:os"
 import "core:math/linalg"
+import "core:fmt"
+
+backface_culling : bool : true
 
 Renderer :: struct
 {
@@ -44,6 +47,8 @@ get_or_add_texture :: proc(textures : ^[dynamic]base.Texture, new_texture : base
             return i
         }
     }
+    //fmt.println("AHHHH")
+    //fmt.println(new_texture.pixels)
     index := len(textures)
     append(textures, new_texture)
     return index
@@ -118,6 +123,7 @@ total_area :: proc(a, b, c : base.ScreenCoord) -> f32
 draw_triangle_tile :: proc(renderer : ^Renderer, tri : base.RasterTriangle, tile_x_min, tile_x_max, tile_y_min, tile_y_max : i32)
 {
     tex := renderer.textures[tri.texture_index]
+    //fmt.println(renderer.textures[tri.texture_index])
     area := tri.area
     render_width : int = int(renderer.render_width)
     render_height : int = int(renderer.render_height)
@@ -148,9 +154,9 @@ draw_triangle_tile :: proc(renderer : ^Renderer, tri : base.RasterTriangle, tile
 
     // get starting coordinate at top left of bounding box
     start_p := base.ScreenCoord{x_min, y_min}
-    start_alpha := total_area(start_p, tri.s1, tri.s2)    
-    start_beta := total_area(start_p, tri.s2, tri.s0)
-    start_gamma := total_area(start_p, tri.s0, tri.s1)
+    start_alpha := total_area(start_p, tri.s1, tri.s2) / area    
+    start_beta := total_area(start_p, tri.s2, tri.s0) / area
+    start_gamma := total_area(start_p, tri.s0, tri.s1) / area
 
     row_alpha, row_beta, row_gamma : f32 = start_alpha, start_beta, start_gamma
 
@@ -177,8 +183,9 @@ draw_triangle_tile :: proc(renderer : ^Renderer, tri : base.RasterTriangle, tile
                     light_color : base.Color = (c0 * alpha) + (c1 * beta) + (c2 * gamma)
 
                     // interpolate uvs and sample
-                    uvx : f32 = (u0 * alpha) + (u1 * beta) + (u0 * gamma)
+                    uvx : f32 = (u0 * alpha) + (u1 * beta) + (u2 * gamma)
                     uvy : f32 = (v0 * alpha) + (v1 * beta) + (v2 * gamma)
+                    //fmt.println(tex.name, tex.height)
                     sample : base.Color = base.sample_texture(tex, uvx, uvy)
 
                     // combine and write to buffer
@@ -278,6 +285,7 @@ draw_mesh :: proc(renderer : ^Renderer, mesh : base.Mesh, mvp, model_matrix : ma
     if len(mesh.vertices) > len(renderer.raster_verticies)
     {
         reserve(&renderer.raster_verticies, len(mesh.vertices))
+        resize(&renderer.raster_verticies, len(mesh.vertices))
     }
 
     calculate_light :: proc(renderer : ^Renderer, v : base.Vertex, model_matrix : matrix[4,4]f32) -> base.Color
@@ -313,6 +321,11 @@ draw_mesh :: proc(renderer : ^Renderer, mesh : base.Mesh, mvp, model_matrix : ma
     for group in mesh.face_groups
     {
         // check for texture and add it if it doesn't exist yet
+        mat, ok := mesh.materials[group.material_name]
+        if !ok
+        {
+            fmt.panicf("No material, everyone panic")
+        }
         group_texture : base.Texture = mesh.materials[group.material_name].texture
         texture_index := get_or_add_texture(&renderer.textures, group_texture)
 
@@ -345,7 +358,7 @@ draw_mesh :: proc(renderer : ^Renderer, mesh : base.Mesh, mvp, model_matrix : ma
 
                 // calculate area and skip backfacing triangles
                 area : f32 = total_area(s0, s1, s2)
-                if area > 0 {continue}
+                if backface_culling && area > 0 {continue}
 
                 f0 : base.FragCoord = {out0.position.z, out0.light_color, out0.uv, out0.normal}
                 f1 : base.FragCoord = {out1.position.z, out1.light_color, out1.uv, out1.normal}
@@ -415,12 +428,12 @@ clear_depth_buffer :: proc(renderer : ^Renderer)
     slice.fill(renderer.depthbuffer, 1.0)
 }
 
-get_framebuffer :: proc(renderer : Renderer) -> []u32
+get_framebuffer :: proc(renderer : ^Renderer) -> []u32
 {
     return renderer.framebuffer
 }
 
-close :: proc(renderer : Renderer)
+close :: proc(renderer : ^Renderer)
 {
     delete(renderer.framebuffer)
     delete(renderer.depthbuffer)

@@ -1,6 +1,7 @@
 package base
 
 import rl "vendor:raylib"
+import "core:fmt"
 
 process_input :: proc(speed : f32) -> (direction: V3, mouse_delta: V2)
 {
@@ -9,23 +10,25 @@ process_input :: proc(speed : f32) -> (direction: V3, mouse_delta: V2)
     left : bool = rl.IsKeyDown(rl.KeyboardKey.A)
     right : bool = rl.IsKeyDown(rl.KeyboardKey.D)
 
+    
     if forward {direction.z += 1}
     if backward {direction.z -= 1}
-    if left {direction.x += 1}
-    if right {direction.x -= 1}
-
+    if left {direction.x -= 1}
+    if right {direction.x += 1}
+    
     direction.x *= speed
     direction.y *= speed
     direction.z *= speed
-
+    
     mouse_delta = rl.GetMouseDelta()
     mouse_delta.y = -mouse_delta.y
-
-    if !rl.IsMouseButtonDown(rl.MouseButton.RIGHT)
+    mouse_delta.x = -mouse_delta.x
+    
+    if !rl.IsKeyDown(rl.KeyboardKey.LEFT_SHIFT)
     {
         mouse_delta.x = 0
         mouse_delta.y = 0
     }
 
-    return
+    return direction, mouse_delta
 }

@@ -24,6 +24,7 @@ load_texture :: proc(filepath : cstring) -> Texture
     raylib_slice := img_ptr[:total_pixels]
     odin_slice := make([][4]f32, total_pixels)
     copy(odin_slice,  raylib_slice)
+    //fmt.println("loading texture", filepath)
     return {filepath, image.width, image.height, odin_slice}
 }
 
@@ -34,14 +35,16 @@ unload_texture :: proc(texture : ^Texture)
 
 sample_texture :: proc(texture : Texture, u, v : f32, clamp_edges : bool = false) -> Color
 {
+    u := u
+    v := v
     if clamp_edges
     {
-        u := clamp(u, 0.0, 1.0)
-        v := clamp(v, 0.0, 1.0)
+        u = clamp(u, 0.0, 1.0)
+        v = clamp(v, 0.0, 1.0)
     } else
     {
-        u := u - math.floor(u)
-        v := v - math.floor(v)
+        u = u - math.floor(u)
+        v = v - math.floor(v)
     }
 
     tex_x := i32(u * f32(texture.width - 1))

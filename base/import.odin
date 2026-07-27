@@ -27,10 +27,15 @@ load_obj :: proc(obj_filepath : string) -> Mesh
 
     for line in str.split_lines_iterator(&lines)
     {
-        trimmed := str.trim(line, " ")
-        trimmed = str.trim(trimmed, "\t")
-        if trimmed == "" || str.starts_with(trimmed, "#") {continue}
-        parts : []string = str.split(trimmed, " ")
+        //trimmed := str.trim(line, " \t\r\n")
+        //trimmed = str.trim(trimmed, "\t")
+        //if trimmed == "" || str.starts_with(trimmed, "#") {continue}
+        //parts : []string = str.split(trimmed, " \t")
+        parts := str.fields(line)
+        defer delete(parts)
+
+        if len(parts) == 0 || str.starts_with(parts[0], "#") {continue}
+
         prefix : string = parts[0]
 
         switch prefix
@@ -46,16 +51,22 @@ load_obj :: proc(obj_filepath : string) -> Mesh
                     append(&face_groups, FaceGroup{len(faces) - 1, current_material})
                     start_face_index = len(faces)
                 }
-                current_material = parts[1]
+                current_material = str.clone(parts[1])
             case "v":
                 v1, s1 := strconv.parse_f32(parts[1])
                 v2, s2 := strconv.parse_f32(parts[2])
                 v3, s3 := strconv.parse_f32(parts[3])
-                append(&verticies, V3{v1, v2, v3})
+                if !s1 || !s2 || !s3 
+                {
+                    fmt.print(parts[0], v1, v2, v3)
+                    fmt.panicf("failed to parse f32 vertex")
+                    
+                }
+                append(&verticies, V3{v1, -v2, v3})
             case "vt":
                 u, s1 := strconv.parse_f32(parts[1])
                 v, s2 := strconv.parse_f32(parts[2])
-                v = abs(1.0 - v)
+                v = 1.0 - v
                 append(&uvs, V2{u, v})
             case "vn":
                 n1 , s1 := strconv.parse_f32(parts[1])
@@ -79,7 +90,7 @@ load_obj :: proc(obj_filepath : string) -> Mesh
 
 load_materials :: proc(mtl_filepath : string) -> map[string]Material
 {
-    materials : map[string]Material
+    materials : map[string]Material = make(map[string]Material)
     data, ok := os.read_entire_file_from_path(mtl_filepath, context.allocator)
     defer delete(data)
     lines := string(data)
@@ -93,12 +104,12 @@ load_materials :: proc(mtl_filepath : string) -> map[string]Material
         if trimmed == "" || str.starts_with(trimmed, "#") {continue}
         parts : []string = str.split(trimmed, " ")
         prefix : string = parts[0]
-        fmt.println(prefix)
+        //fmt.println(prefix)
         
         switch prefix
         {
             case "newmtl":
-                current_material_name = parts[1]
+                current_material_name = str.clone(parts[1])
                 materials[current_material_name] = Material{}
             case "map_Kd":
                 if current_material_name != ""

@@ -1,41 +1,50 @@
 package base
 
 import la "core:math/linalg"
+import "core:math"
 
 Camera :: struct
 {
     view_matrix, proj_matrix : M4,
     position, look_at, up : V3,
     fov, aspect, near, far : f32,
+    yaw, pitch : f32,
 }
 
 create_camera :: proc(position, look_at : V3, fov, aspect, near, far : f32) -> Camera
 {
     up := V3{0, 1, 0}
-    look_at := la.normalize(look_at - position)
-    view_matrix := la.matrix4_look_at(position, la.normalize(look_at - position), up)
+    view_matrix := la.matrix4_look_at(position, look_at, up)
     proj_matrix := la.matrix4_perspective(fov, aspect, near, far)
-    return {view_matrix, proj_matrix, position, look_at, up, fov, aspect, near, far}
+
+    forward := la.normalize(look_at - position)
+    pitch := math.asin(forward.y)
+    yaw := math.atan2(forward.z, forward.x)
+
+    return {view_matrix, proj_matrix, position, look_at, up, fov, aspect, near, far, yaw, pitch}
 }
 
 move_camera :: proc(camera : ^Camera, move_delta : V3, mouse_delta : V2)
 {
-    pointing_vector : V3 = la.normalize(camera.look_at - camera.position)
-    right_vector : V3 = la.normalize(la.cross(camera.up, pointing_vector))
-    up_vector : V3 = la.normalize((camera.position + camera.up) - camera.position)
+    mouse_sensitivity : f32 = 0.005
 
-    camera.position += right_vector * move_delta.x
-    camera.position += up_vector * move_delta.y
-    camera.position += pointing_vector * move_delta.z
+    camera.yaw += -mouse_delta.x * mouse_sensitivity
+    camera.pitch += -mouse_delta.y * mouse_sensitivity
+    camera.pitch = clamp(camera.pitch, -1.5, 1.5)
 
-    camera.look_at += right_vector * move_delta.x
-    camera.look_at += up_vector * move_delta.y
-    camera.look_at += pointing_vector * move_delta.z
+    forward : V3
+    forward.x = math.cos(camera.yaw) * math.cos(camera.pitch)
+    forward.y = math.sin(camera.pitch)
+    forward.z = math.sin(camera.yaw) * math.cos(camera.pitch)
+    forward = la.normalize(forward)
 
-    yaw_pitch_matrix : M4 = la.matrix4_from_yaw_pitch_roll(-mouse_delta.x, -mouse_delta.y, 0)
-    forward : V3 = camera.look_at - camera.position
-    forward_v4 : V4 = {forward.x, forward.y, forward.z, 1.0}
-    forward_v3 : V3 = (yaw_pitch_matrix * forward_v4).xyz  
-    camera.look_at = camera.position + forward_v3
+    right := la.normalize(la.cross(forward, camera.up))
+
+    camera.position += right * move_delta.x
+    camera.position += camera.up * move_delta.y 
+    camera.position += forward * move_delta.z
+
+    camera.look_at = camera.position + forward
     camera.view_matrix = la.matrix4_look_at(camera.position, camera.look_at, camera.up)
+
 }

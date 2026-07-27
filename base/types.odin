@@ -93,3 +93,10 @@ RasterVertex :: struct
     normal : V3,
     uv : V2,
 }
+
+Options :: struct
+{
+    backface_culling : bool,
+    affine_textures : bool,
+    frame_target : int,
+}

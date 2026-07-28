@@ -6,7 +6,7 @@ import "core:math"
 import "core:thread"
 import "core:os"
 import "core:math/linalg"
-import "core:fmt"
+import "core:log"
 
 backface_culling : bool : true
 
@@ -36,6 +36,7 @@ Render_Thread :: struct
 {
     renderer : ^Renderer,
     index : i32,
+    logger : log.Logger
 }
 
 get_or_add_texture :: proc(textures : ^[dynamic]base.Texture, new_texture : base.Texture) -> int
@@ -47,8 +48,6 @@ get_or_add_texture :: proc(textures : ^[dynamic]base.Texture, new_texture : base
             return i
         }
     }
-    //fmt.println("AHHHH")
-    //fmt.println(new_texture.pixels)
     index := len(textures)
     append(textures, new_texture)
     return index
@@ -60,6 +59,7 @@ render_task :: proc(task : thread.Task)
     data := cast(^Render_Thread)task.data
     renderer := data.renderer
     index := data.index
+    context.logger = data.logger
 
     tile_x_min := (index % renderer.tile_x) * renderer.tile_size
     tile_x_max := tile_x_min + renderer.tile_size - 1
@@ -123,7 +123,6 @@ total_area :: proc(a, b, c : base.ScreenCoord) -> f32
 draw_triangle_tile :: proc(renderer : ^Renderer, tri : base.RasterTriangle, tile_x_min, tile_x_max, tile_y_min, tile_y_max : i32)
 {
     tex := renderer.textures[tri.texture_index]
-    //fmt.println(renderer.textures[tri.texture_index])
     area := tri.area
     render_width : int = int(renderer.render_width)
     render_height : int = int(renderer.render_height)
@@ -185,7 +184,6 @@ draw_triangle_tile :: proc(renderer : ^Renderer, tri : base.RasterTriangle, tile
                     // interpolate uvs and sample
                     uvx : f32 = (u0 * alpha) + (u1 * beta) + (u2 * gamma)
                     uvy : f32 = (v0 * alpha) + (v1 * beta) + (v2 * gamma)
-                    //fmt.println(tex.name, tex.height)
                     sample : base.Color = base.sample_texture(tex, uvx, uvy)
 
                     // combine and write to buffer
@@ -324,7 +322,7 @@ draw_mesh :: proc(renderer : ^Renderer, mesh : base.Mesh, mvp, model_matrix : ma
         mat, ok := mesh.materials[group.material_name]
         if !ok
         {
-            fmt.panicf("No material, everyone panic")
+            log.fatal("Material doesn't exist in map!")
         }
         group_texture : base.Texture = mesh.materials[group.material_name].texture
         texture_index := get_or_add_texture(&renderer.textures, group_texture)
@@ -395,6 +393,7 @@ draw_mesh :: proc(renderer : ^Renderer, mesh : base.Mesh, mvp, model_matrix : ma
 
 begin_draw :: proc(renderer : ^Renderer)
 {
+    log.debug("bingus")
     for &tile in renderer.tile_bins
     {
         clear(&tile)
@@ -407,7 +406,7 @@ end_draw :: proc(renderer : ^Renderer)
     task_data := make([]Render_Thread, len(renderer.tile_bins), context.temp_allocator)
     for _, index in renderer.tile_bins
     {
-        task_data[index] = Render_Thread{renderer, i32(index)}
+        task_data[index] = Render_Thread{renderer, i32(index), context.logger}
         thread.pool_add_task(renderer.thread_pool, context.allocator, render_task, rawptr(&task_data[index]))
     }
     thread.pool_finish(renderer.thread_pool)

@@ -1,6 +1,6 @@
 package display
 
-import "core:fmt"
+import "core:log"
 import rl "vendor:raylib"
 
 Display :: struct
@@ -41,7 +41,7 @@ present :: proc(display : Display, framebuffer : []u32) -> bool
 {
     if display.render_width * display.render_height != i32(len(framebuffer))
     {
-        fmt.println("Render Target Mismatch!")
+        log.fatal("Render target mismatch")
         return false
     }
 

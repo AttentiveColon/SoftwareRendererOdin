@@ -1,10 +1,10 @@
 package main
 
-import "core:fmt"
 import "display"
 import "renderer"
 import "base"
 import "core:math/linalg"
+import "core:log"
 
 Display :: display.Display
 Renderer :: renderer.Renderer
@@ -22,7 +22,7 @@ Program :: struct
 
 create_program :: proc() -> Program
 {
-    render_scale : i32 = 1
+    render_scale : i32 = 3
     window_scale : i32 = 3
     return {
         render_scale,      // render scale
@@ -31,7 +31,7 @@ create_program :: proc() -> Program
         256,    // render height                // render resolution is changed
         320 * window_scale,    // window width
         240 * window_scale,    // window height
-        0,     // frame target (0 for uncapped)
+        60,     // frame target (0 for uncapped)
         "title" // window title
     }
 }
@@ -52,10 +52,7 @@ run :: proc(program : Program)
     defer renderer.close(&r)
 
     mesh := base.load_obj("assets/leon.obj")
-    //fmt.println(mesh.materials["Material"].texture.pixels)
-    //if testing {return}
 
-    //fmt.println(mesh.materials["Material"].texture)
 
     camera := base.create_camera(
         {20,-20,20}, {0,0,0}, 3.14*0.5, 
@@ -74,9 +71,8 @@ run :: proc(program : Program)
         renderer.clear_buffer(&r, {1.0, 1.0, 1.0, 1.0})
         renderer.begin_draw(&r)
 
-        direction, delta := base.process_input(0.8)
+        direction, delta := base.process_input(0.1)
         base.move_camera(&camera, direction, delta)
-        //fmt.println(direction, delta)
         mvp_matrix = camera.proj_matrix * camera.view_matrix * trs_matrix
 
         renderer.draw_mesh(&r, mesh, mvp_matrix, trs_matrix)
@@ -89,6 +85,7 @@ run :: proc(program : Program)
 
 main :: proc()
 {
+    context.logger = log.create_console_logger()
     program : Program = create_program()
     run(program)
 }

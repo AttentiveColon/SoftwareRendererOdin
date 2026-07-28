@@ -1,7 +1,7 @@
 package base
 
 import rl "vendor:raylib"
-import "core:fmt"
+import "core:log"
 import "core:math"
 
 Texture :: struct
@@ -24,7 +24,6 @@ load_texture :: proc(filepath : cstring) -> Texture
     raylib_slice := img_ptr[:total_pixels]
     odin_slice := make([][4]f32, total_pixels)
     copy(odin_slice,  raylib_slice)
-    //fmt.println("loading texture", filepath)
     return {filepath, image.width, image.height, odin_slice}
 }
 

@@ -1,9 +1,9 @@
 package base
 
-import fmt "core:fmt"
 import os "core:os"
 import str "core:strings"
 import "core:strconv"
+import "core:log"
 
 load_obj :: proc(obj_filepath : string) -> Mesh
 {
@@ -58,9 +58,7 @@ load_obj :: proc(obj_filepath : string) -> Mesh
                 v3, s3 := strconv.parse_f32(parts[3])
                 if !s1 || !s2 || !s3 
                 {
-                    fmt.print(parts[0], v1, v2, v3)
-                    fmt.panicf("failed to parse f32 vertex")
-                    
+                    log.panic("Failed to parse f32")
                 }
                 append(&verticies, V3{v1, -v2, v3})
             case "vt":
@@ -104,7 +102,6 @@ load_materials :: proc(mtl_filepath : string) -> map[string]Material
         if trimmed == "" || str.starts_with(trimmed, "#") {continue}
         parts : []string = str.split(trimmed, " ")
         prefix : string = parts[0]
-        //fmt.println(prefix)
         
         switch prefix
         {

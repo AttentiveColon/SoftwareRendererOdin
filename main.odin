@@ -22,17 +22,17 @@ Program :: struct
 
 create_program :: proc() -> Program
 {
-    render_scale : i32 = 3
+    render_scale : i32 = 1
     window_scale : i32 = 3
     return {
-        render_scale,      // render scale
-        window_scale,      // window scale
-        512,    // render width                 // TODO: crash relating to allocating to tile bins when
-        256,    // render height                // render resolution is changed
-        320 * window_scale,    // window width
-        240 * window_scale,    // window height
-        60,     // frame target (0 for uncapped)
-        "title" // window title
+        render_scale,           // render scale
+        window_scale,           // window scale
+        320 * render_scale,     // render width                 
+        220 * render_scale,     // render height                
+        320 * window_scale,     // window width
+        240 * window_scale,     // window height
+        60,                     // frame target (0 for uncapped)
+        "title"                 // window title
     }
 }
 

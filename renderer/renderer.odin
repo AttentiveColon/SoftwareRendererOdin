@@ -85,6 +85,19 @@ create :: proc(render_width, render_height : i32) -> Renderer
     tile_size : i32 = 32
     tile_x : i32 = render_width / tile_size
     tile_y : i32 = render_height / tile_size
+
+    // if tile size does not cleanly divide into render size add extra
+    // tile row or column to have full coverage of screen and avoid 
+    // assigning triangles to out of range bins
+    if render_width % tile_size != 0
+    {
+        tile_x += 1
+    }
+    if render_height % tile_size != 0
+    {
+        tile_y += 1
+    }
+
     tile_bins := make([][dynamic]base.RasterTriangle, tile_x * tile_y)
     textures : [dynamic]base.Texture
     raster_verticies : [dynamic]base.RasterVertex
@@ -393,7 +406,6 @@ draw_mesh :: proc(renderer : ^Renderer, mesh : base.Mesh, mvp, model_matrix : ma
 
 begin_draw :: proc(renderer : ^Renderer)
 {
-    log.debug("bingus")
     for &tile in renderer.tile_bins
     {
         clear(&tile)

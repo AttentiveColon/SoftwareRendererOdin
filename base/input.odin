@@ -1,7 +1,7 @@
 package base
 
 import rl "vendor:raylib"
-import "core:log"
+//import "core:log"
 
 process_input :: proc(speed : f32) -> (direction: V3, mouse_delta: V2)
 {

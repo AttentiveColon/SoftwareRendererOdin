@@ -1,6 +1,5 @@
 package base
 
-import "core:flags/example"
 
 V4 :: [4]f32
 V3 :: [3]f32
@@ -84,6 +83,21 @@ Mesh :: struct
     faces : []Face,
     materials : map[string]Material,
     face_groups : []FaceGroup,
+}
+
+destroy_mesh :: proc(mesh : ^Mesh)
+{
+    delete(mesh.vertices)
+    delete(mesh.faces)
+    delete(mesh.face_groups)
+
+    for key, material in mesh.materials
+    {
+        delete(key)
+        mat := material
+        unload_texture(&mat.texture)
+    }
+    delete(mesh.materials)
 }
 
 RasterVertex :: struct

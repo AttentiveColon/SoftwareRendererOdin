@@ -332,7 +332,7 @@ draw_mesh :: proc(renderer : ^Renderer, mesh : base.Mesh, mvp, model_matrix : ma
     for group in mesh.face_groups
     {
         // check for texture and add it if it doesn't exist yet
-        mat, ok := mesh.materials[group.material_name]
+        _, ok := mesh.materials[group.material_name]
         if !ok
         {
             log.fatal("Material doesn't exist in map!")
@@ -406,9 +406,11 @@ draw_mesh :: proc(renderer : ^Renderer, mesh : base.Mesh, mvp, model_matrix : ma
 
 begin_draw :: proc(renderer : ^Renderer)
 {
-    for &tile in renderer.tile_bins
+    clear(&renderer.textures)
+    //clear(&renderer.raster_verticies) //TODO: check if this is neccessary. 
+    for i := 0; i < len(renderer.tile_bins); i+=1
     {
-        clear(&tile)
+        clear(&renderer.tile_bins[i])
     }
     clear_depth_buffer(renderer)
 }
@@ -422,6 +424,15 @@ end_draw :: proc(renderer : ^Renderer)
         thread.pool_add_task(renderer.thread_pool, context.allocator, render_task, rawptr(&task_data[index]))
     }
     thread.pool_finish(renderer.thread_pool)
+
+    for
+    {
+        _, ok := thread.pool_pop_done(renderer.thread_pool)
+        if !ok
+        {
+            break
+        }
+    }
 }
 
 update_light_position :: proc(renderer : ^Renderer, position : base.V3)

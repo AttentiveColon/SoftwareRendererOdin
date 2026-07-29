@@ -3,33 +3,37 @@ package base
 import rl "vendor:raylib"
 import "core:log"
 import "core:math"
+import "core:strings"
 
 Texture :: struct
 {
-    name : cstring,
+    name : string,
     width, height : i32,
     pixels : []V4
 }
 
-load_texture :: proc(filepath : cstring) -> Texture
+load_texture :: proc(filepath : string) -> Texture
 {
-    image := rl.LoadImage(filepath)
+    filepath_cstring := strings.clone_to_cstring(filepath, context.temp_allocator)
+    image := rl.LoadImage(filepath_cstring)
     defer rl.UnloadImage(image)
     if image.data != nil
     {
         rl.ImageFormat(&image, rl.PixelFormat.UNCOMPRESSED_R32G32B32A32)
     }
+    else { log.panic("Failed to load image data!") }
     total_pixels := image.width * image.height
     img_ptr := cast([^][4]f32) image.data
     raylib_slice := img_ptr[:total_pixels]
     odin_slice := make([][4]f32, total_pixels)
     copy(odin_slice,  raylib_slice)
-    return {filepath, image.width, image.height, odin_slice}
+    return {strings.clone(filepath), image.width, image.height, odin_slice}
 }
 
 unload_texture :: proc(texture : ^Texture)
 {
     delete(texture.pixels)
+    delete(texture.name)
 }
 
 sample_texture :: proc(texture : Texture, u, v : f32, clamp_edges : bool = false) -> Color

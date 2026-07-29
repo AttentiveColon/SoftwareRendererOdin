@@ -31,7 +31,7 @@ create_program :: proc() -> Program
         220 * render_scale,     // render height                
         320 * window_scale,     // window width
         240 * window_scale,     // window height
-        60,                     // frame target (0 for uncapped)
+        0,                     // frame target (0 for uncapped)
         "title"                 // window title
     }
 }
@@ -52,6 +52,7 @@ run :: proc(program : Program)
     defer renderer.close(&r)
 
     mesh := base.load_obj("assets/leon.obj")
+    defer base.destroy_mesh(&mesh)
 
 
     camera := base.create_camera(
@@ -64,7 +65,7 @@ run :: proc(program : Program)
     mvp_matrix : matrix[4,4]f32 = camera.proj_matrix * camera.view_matrix * trs_matrix
     renderer.update_light_position(&r, {100, -15, 0})
 
-    frame : f32 = 0.0
+    //frame : f32 = 0.0
     for 
     {   
         free_all(context.temp_allocator)
@@ -86,6 +87,8 @@ run :: proc(program : Program)
 main :: proc()
 {
     context.logger = log.create_console_logger()
+    defer log.destroy_console_logger(context.logger)
+
     program : Program = create_program()
     run(program)
 }

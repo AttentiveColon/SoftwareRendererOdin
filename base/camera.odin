@@ -48,3 +48,8 @@ move_camera :: proc(camera : ^Camera, move_delta : V3, mouse_delta : V2)
     camera.view_matrix = la.matrix4_look_at(camera.position, camera.look_at, camera.up)
 
 }
+
+get_view_projection :: proc(camera : ^Camera) -> matrix[4,4]f32
+{
+    return camera.proj_matrix * camera.view_matrix
+}

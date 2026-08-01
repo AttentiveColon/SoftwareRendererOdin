@@ -1,5 +1,6 @@
 package renderer
 
+import "core:prof/spall"
 import "../base"
 import "core:slice"
 import "core:math"
@@ -7,6 +8,7 @@ import "core:thread"
 import "core:os"
 import "core:math/linalg"
 import "core:log"
+
 
 backface_culling : bool : true
 
@@ -30,6 +32,10 @@ Renderer :: struct
     global_light_position : base.V3,
 
     thread_pool : ^thread.Pool,
+    thread_pool_size : int,
+
+    spall_ctx : ^spall.Context,
+    spall_buffer: ^spall.Buffer,
 }
 
 Render_Thread :: struct
@@ -77,7 +83,7 @@ render_task :: proc(task : thread.Task)
     }
 }
 
-create :: proc(render_width, render_height : i32) -> Renderer
+create :: proc(render_width, render_height : i32, spall_ctx : ^spall.Context, spall_buffer : ^spall.Buffer) -> Renderer
 {
     framebuffer := make([]u32, render_width * render_height)
     depthbuffer := make([]f32, render_width * render_height)
@@ -107,8 +113,13 @@ create :: proc(render_width, render_height : i32) -> Renderer
     global_light_position : base.V3 = {15,15,15}
 
     thread_pool := new(thread.Pool)
-    thread.pool_init(thread_pool, context.allocator, os.get_processor_core_count())
+    thread_pool_size := os.get_processor_core_count()
+    thread.pool_init(thread_pool, context.allocator, thread_pool_size)
     thread.pool_start(thread_pool)
+
+    // allocate persistent thread memory
+    num_tiles := tile_x * tile_y
+    
     
     return {
         render_width, 
@@ -125,6 +136,9 @@ create :: proc(render_width, render_height : i32) -> Renderer
         polygon_buffer,
         global_light_position,
         thread_pool,
+        thread_pool_size,
+        spall_ctx,
+        spall_buffer,
     }
 }
 
@@ -287,8 +301,30 @@ cull_slice_triangle :: proc(renderer : ^Renderer, rv0, rv1, rv2 : base.RasterVer
     }
 }
 
-draw_mesh :: proc(renderer : ^Renderer, mesh : base.Mesh, mvp, model_matrix : matrix[4,4]f32)
+
+
+calculate_light :: proc(renderer : ^Renderer, v : base.Vertex, model_matrix : matrix[4,4]f32) -> base.Color
 {
+    obj_normal : base.V3 = {v.nx, v.ny, v.nz}
+    v4_normal : base.V4 = {obj_normal.x, obj_normal.y, obj_normal.z, 0.0}
+    world_normal : base.V4 = linalg.normalize(linalg.mul(model_matrix, v4_normal))
+    world_position : base.V3 = (model_matrix * base.V4{v.x, v.y, v.z, 1.0}).xyz
+    light_direction : base.V3 = renderer.global_light_position - world_position
+
+    diffuse : f32 = math.max(linalg.dot(light_direction, world_normal.xyz), 0.0)
+    ambient : f32 = 0.2
+    total_light : f32 = math.min(diffuse + ambient, 1.0)
+    
+    return base.Color{total_light, total_light, total_light, 1.0}
+}
+
+draw_mesh :: proc(renderer : ^Renderer, mesh : ^base.Mesh, model_matrix, view_proj : matrix[4,4]f32)
+{
+    mvp := view_proj * model_matrix
+
+    // TODO: Future optimization -> Frustrum Culling
+    // if !is_in_frustrum(mesh.bounding_sphere, mvp) {continue}
+
     current_face_index : int = 0
     half_width, half_height : f32 = f32(renderer.render_width / 2), f32(renderer.render_height / 2)
 
@@ -299,104 +335,101 @@ draw_mesh :: proc(renderer : ^Renderer, mesh : base.Mesh, mvp, model_matrix : ma
         resize(&renderer.raster_verticies, len(mesh.vertices))
     }
 
-    calculate_light :: proc(renderer : ^Renderer, v : base.Vertex, model_matrix : matrix[4,4]f32) -> base.Color
+    // hoist texture lookups so it is only calculated once for entire draw call
+    group_texture_indicies := make([]int, len(mesh.face_groups), context.temp_allocator)
+    for group, i in mesh.face_groups 
     {
-        obj_normal : base.V3 = {v.nx, v.ny, v.nz}
-        v4_normal : base.V4 = {obj_normal.x, obj_normal.y, obj_normal.z, 0.0}
-        world_normal : base.V4 = linalg.normalize(linalg.mul(model_matrix, v4_normal))
-        world_position : base.V3 = (model_matrix * base.V4{v.x, v.y, v.z, 1.0}).xyz
-        light_direction : base.V3 = renderer.global_light_position - world_position
-
-        diffuse : f32 = math.max(linalg.dot(light_direction, world_normal.xyz), 0.0)
-        ambient : f32 = 0.2
-        total_light : f32 = math.min(diffuse + ambient, 1.0)
-
-        return base.Color{total_light, total_light, total_light, 1.0}
+        if _, ok := mesh.materials[group.material_name]; !ok {
+            log.fatal("Material doesn't exist in map!")
+        }
+        tex := mesh.materials[group.material_name].texture
+        group_texture_indicies[i] = get_or_add_texture(&renderer.textures, tex)
     }
 
     // precalculate vertices to avoid recalculating shared verticies
-    for vertex, idx in mesh.vertices
     {
-        raster_vertex : base.RasterVertex = {
-            position = mvp * base.V4{vertex.x, vertex.y, vertex.z, 1.0},
-            light_color = calculate_light(renderer, vertex, model_matrix),
-            normal = {vertex.nx, vertex.ny, vertex.nz},
-            uv = {vertex.u, vertex.v},
+
+        //spall.SCOPED_EVENT(renderer.spall_ctx, renderer.spall_buffer, "Calculate Lighting")
+        for vertex, idx in mesh.vertices
+        {
+            raster_vertex : base.RasterVertex = {
+                position = mvp * base.V4{vertex.x, vertex.y, vertex.z, 1.0},
+                light_color = calculate_light(renderer, vertex, model_matrix),
+                normal = {vertex.nx, vertex.ny, vertex.nz},
+                uv = {vertex.u, vertex.v},
+            }
+            renderer.raster_verticies[idx] = raster_vertex // this might break
+            
+            // if the above breaks, clear array and then call this append below 
+            //append(&renderer.raster_verticies, raster_vertex)
         }
-        renderer.raster_verticies[idx] = raster_vertex // this might break
-        
-        // if the above breaks, clear array and then call this append below 
-        //append(&renderer.raster_verticies, raster_vertex)
     }
 
-    for group in mesh.face_groups
+    // calculate and render face groups
     {
-        // check for texture and add it if it doesn't exist yet
-        _, ok := mesh.materials[group.material_name]
-        if !ok
+        //spall.SCOPED_EVENT(renderer.spall_ctx, renderer.spall_buffer, "Process Faces")
+        for group, group_idx in mesh.face_groups
         {
-            log.fatal("Material doesn't exist in map!")
-        }
-        group_texture : base.Texture = mesh.materials[group.material_name].texture
-        texture_index := get_or_add_texture(&renderer.textures, group_texture)
-
-        // collect and distribute triangles to associated tile bins
-        for ; current_face_index <= group.last_face_index; current_face_index+=1
-        {
-            face : base.Face = mesh.faces[current_face_index]
-
-            rv0 : base.RasterVertex = renderer.raster_verticies[face.f0]
-            rv1 : base.RasterVertex = renderer.raster_verticies[face.f1]
-            rv2 : base.RasterVertex = renderer.raster_verticies[face.f2]        
-                
-            cull_slice_triangle(renderer, rv0, rv1, rv2)
-
-            for i := 0; i < len(renderer.clip_buffer); i+=3
+             texture_index := group_texture_indicies[group_idx]
+            
+            // collect and distribute triangles to associated tile bins
+            for ; current_face_index <= group.last_face_index; current_face_index+=1
             {
-                out0 : base.RasterVertex = renderer.clip_buffer[i]
-                out1 : base.RasterVertex = renderer.clip_buffer[i + 1]
-                out2 : base.RasterVertex = renderer.clip_buffer[i + 2]
-
-                // perspective division
-                out0.position /= out0.position.w
-                out1.position /= out1.position.w
-                out2.position /= out2.position.w
-
-                // create 2d geometry coordinates
-                s0 : base.ScreenCoord = {int((out0.position.x + 1) * half_width), int((out0.position.y + 1) * half_height)}
-                s1 : base.ScreenCoord = {int((out1.position.x + 1) * half_width), int((out1.position.y + 1) * half_height)}
-                s2 : base.ScreenCoord = {int((out2.position.x + 1) * half_width), int((out2.position.y + 1) * half_height)}
-
-                // calculate area and skip backfacing triangles
-                area : f32 = total_area(s0, s1, s2)
-                if backface_culling && area > 0 {continue}
-
-                f0 : base.FragCoord = {out0.position.z, out0.light_color, out0.uv, out0.normal}
-                f1 : base.FragCoord = {out1.position.z, out1.light_color, out1.uv, out1.normal}
-                f2 : base.FragCoord = {out2.position.z, out2.light_color, out2.uv, out2.normal}
-
-                // create final triangle for binning
-                tri : base.RasterTriangle = {s0, s1, s2, f0, f1, f2, texture_index, area}
-
-                // get triangle bounds and clamp to screen width and height
-                x_min := math.max(math.min(math.min(s0.x, s1.x), s2.x), 0)
-                x_max := math.min(math.max(math.max(s0.x, s1.x), s2.x), int(renderer.render_width - 1))
-                y_min := math.max(math.min(math.min(s0.y, s1.y), s2.y), 0)
-                y_max := math.min(math.max(math.max(s0.y, s1.y), s2.y), int(renderer.render_height - 1))
-
-                // find which bins each triangle crosses (shift by X where 2^X == tile_size)
-                // default tile size is 32, so x is 5 or 2^5 which == 32
-                start_x := x_min >> 5
-                start_y := y_min >> 5
-                end_x := x_max >> 5
-                end_y := y_max >> 5
+                face : base.Face = mesh.faces[current_face_index]
                 
-                // iterate all possible bins of each triangle and place triangles
-                for y := start_y; y <= end_y; y += 1
+                rv0 : base.RasterVertex = renderer.raster_verticies[face.f0]
+                rv1 : base.RasterVertex = renderer.raster_verticies[face.f1]
+                rv2 : base.RasterVertex = renderer.raster_verticies[face.f2]        
+                
+                cull_slice_triangle(renderer, rv0, rv1, rv2)
+                
+                for i := 0; i < len(renderer.clip_buffer); i+=3
                 {
-                    for x := start_x; x <= end_x; x += 1
+                    out0 : base.RasterVertex = renderer.clip_buffer[i]
+                    out1 : base.RasterVertex = renderer.clip_buffer[i + 1]
+                    out2 : base.RasterVertex = renderer.clip_buffer[i + 2]
+                    
+                    // perspective division
+                    out0.position /= out0.position.w
+                    out1.position /= out1.position.w
+                    out2.position /= out2.position.w
+                    
+                    // create 2d geometry coordinates
+                    s0 : base.ScreenCoord = {int((out0.position.x + 1) * half_width), int((out0.position.y + 1) * half_height)}
+                    s1 : base.ScreenCoord = {int((out1.position.x + 1) * half_width), int((out1.position.y + 1) * half_height)}
+                    s2 : base.ScreenCoord = {int((out2.position.x + 1) * half_width), int((out2.position.y + 1) * half_height)}
+                    
+                    // calculate area and skip backfacing triangles
+                    area : f32 = total_area(s0, s1, s2)
+                    if backface_culling && area > 0 {continue}
+                    
+                    f0 : base.FragCoord = {out0.position.z, out0.light_color, out0.uv, out0.normal}
+                    f1 : base.FragCoord = {out1.position.z, out1.light_color, out1.uv, out1.normal}
+                    f2 : base.FragCoord = {out2.position.z, out2.light_color, out2.uv, out2.normal}
+                    
+                    // create final triangle for binning
+                    tri : base.RasterTriangle = {s0, s1, s2, f0, f1, f2, texture_index, area}
+                    
+                    // get triangle bounds and clamp to screen width and height
+                    x_min := math.max(math.min(math.min(s0.x, s1.x), s2.x), 0)
+                    x_max := math.min(math.max(math.max(s0.x, s1.x), s2.x), int(renderer.render_width - 1))
+                    y_min := math.max(math.min(math.min(s0.y, s1.y), s2.y), 0)
+                    y_max := math.min(math.max(math.max(s0.y, s1.y), s2.y), int(renderer.render_height - 1))
+                    
+                    // find which bins each triangle crosses (shift by X where 2^X == tile_size)
+                    // default tile size is 32, so x is 5 or 2^5 which == 32
+                    start_x := x_min >> 5
+                    start_y := y_min >> 5
+                    end_x := x_max >> 5
+                    end_y := y_max >> 5
+                    
+                    // iterate all possible bins of each triangle and place triangles
+                    for y := start_y; y <= end_y; y += 1
                     {
-                        append(&renderer.tile_bins[y * int(renderer.tile_x) + x], tri)
+                        for x := start_x; x <= end_x; x += 1
+                        {
+                            append(&renderer.tile_bins[y * int(renderer.tile_x) + x], tri)
+                        }
                     }
                 }
             }
@@ -466,6 +499,7 @@ close :: proc(renderer : ^Renderer)
         delete(bin)
     }
     delete(renderer.tile_bins)
+    
     thread.pool_finish(renderer.thread_pool)
     thread.pool_destroy(renderer.thread_pool)
     free(renderer.thread_pool)

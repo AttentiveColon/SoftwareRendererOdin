@@ -5,11 +5,18 @@ import "renderer"
 import "base"
 import "core:math/linalg"
 import "core:log"
+import "core:prof/spall"
+import "core:sync"
+
+
 
 Display :: display.Display
 Renderer :: renderer.Renderer
 
 testing : bool : true
+
+spall_ctx : spall.Context
+@(thread_local) spall_buffer : spall.Buffer
 
 Program :: struct
 {
@@ -48,7 +55,7 @@ run :: proc(program : Program)
     )
     defer display.close(d)
     
-    r : Renderer = renderer.create(program.render_width, program.render_height)
+    r : Renderer = renderer.create(program.render_width, program.render_height, &spall_ctx, &spall_buffer)
     defer renderer.close(&r)
 
     mesh := base.load_obj("assets/leon.obj")
@@ -61,31 +68,54 @@ run :: proc(program : Program)
         0.001, 1000.0
     )
 
-    trs_matrix : matrix[4,4]f32 = linalg.matrix4_scale_f32({0.51, 0.51, 0.51})
+    trs_matrix : matrix[4,4]f32 = linalg.matrix4_scale_f32({0.5, 0.5, 0.5})
     mvp_matrix : matrix[4,4]f32 = camera.proj_matrix * camera.view_matrix * trs_matrix
     renderer.update_light_position(&r, {100, -15, 0})
+    model_matricies := make([dynamic]matrix[4,4]f32)
 
     //frame : f32 = 0.0
     for 
     {   
         free_all(context.temp_allocator)
+        clear(&model_matricies)
         renderer.clear_buffer(&r, {1.0, 1.0, 1.0, 1.0})
         renderer.begin_draw(&r)
 
         direction, delta := base.process_input(0.1)
         base.move_camera(&camera, direction, delta)
-        mvp_matrix = camera.proj_matrix * camera.view_matrix * trs_matrix
 
-        renderer.draw_mesh(&r, mesh, mvp_matrix, trs_matrix)
+        view_proj := base.get_view_projection(&camera)
 
+        {
+            for i in 0..<10
+            {
+                for j in 0..<10
+                {
+                    translation := base.translate({f32(i * 15), 0, -f32(j * 15)}, trs_matrix)
+                    //append(&model_matricies, translation)
+                    {
+                        //spall.SCOPED_EVENT(&spall_ctx, &spall_buffer, "raster_single")
+                        renderer.draw_mesh(&r, &mesh, translation, view_proj)
+                    }
+                }
+            }
+        }
 
-        renderer.end_draw(&r)
+        {
+            renderer.end_draw(&r)
+        }
         if display.present(d, renderer.get_framebuffer(&r)) {break}
     }
 }
 
 main :: proc()
 {
+    spall_ctx = spall.context_create("renderer_trace.spall")
+    defer spall.context_destroy(&spall_ctx)
+    buffer_backing := make([]u8, spall.BUFFER_DEFAULT_SIZE)
+    defer delete(buffer_backing)
+    spall_buffer = spall.buffer_create(buffer_backing, u32(sync.current_thread_id()))
+    defer spall.buffer_destroy(&spall_ctx, &spall_buffer)
     context.logger = log.create_console_logger()
     defer log.destroy_console_logger(context.logger)
 

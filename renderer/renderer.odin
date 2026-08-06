@@ -437,6 +437,129 @@ draw_mesh :: proc(renderer : ^Renderer, mesh : ^base.Mesh, model_matrix, view_pr
     }
 }
 
+draw_model :: proc(renderer : ^Renderer, model : ^base.Model, model_matrix, view_proj : matrix[4,4]f32)
+{
+    mvp := view_proj * model_matrix
+
+    // map models textures to global texture array for this frame
+    global_tex_indices := make([]int, len(model.textures), context.temp_allocator)
+    for tex, i in model.textures 
+    {
+        global_tex_indices[i] = get_or_add_texture(&renderer.textures, tex)
+    }
+
+    // TODO: Future optimization -> Frustrum Culling
+    // if !is_in_frustrum(mesh.bounding_sphere, mvp) {continue}
+
+    half_width, half_height : f32 = f32(renderer.render_width / 2), f32(renderer.render_height / 2)
+
+    for mesh, mesh_index in model.meshes
+    {
+        // preallocate if mesh array is larger than current raster vertex dynamic array
+        if len(mesh.verticies) > len(renderer.raster_verticies)
+        {
+            reserve(&renderer.raster_verticies, len(mesh.verticies))
+            resize(&renderer.raster_verticies, len(mesh.verticies))
+        }
+
+        // precalculate vertices to avoid recalculating shared verticies
+        {
+
+            //spall.SCOPED_EVENT(renderer.spall_ctx, renderer.spall_buffer, "Calculate Lighting")
+            for vertex, idx in mesh.verticies
+            {
+                raster_vertex : base.RasterVertex = {
+                    position = mvp * base.V4{vertex.x, vertex.y, vertex.z, 1.0},
+                    light_color = calculate_light(renderer, vertex, model_matrix),
+                    normal = {vertex.nx, vertex.ny, vertex.nz},
+                    uv = {vertex.u, vertex.v},
+                }
+                renderer.raster_verticies[idx] = raster_vertex // this might break
+
+                // if the above breaks, clear array and then call this append below 
+                //append(&renderer.raster_verticies, raster_vertex)
+            }
+        }
+
+        // lookup mapped global texture index
+        local_tex_idx := model.tex_to_mesh_index[mesh_index]
+        global_tex_idx := global_tex_indices[local_tex_idx]
+
+        // calculate and bin triangles
+        {
+            for i := 0; i < len(mesh.verticies); i += 3
+            {
+                f0 := i
+                f1 := i + 1
+                f2 := i + 2
+                rv0 : base.RasterVertex = renderer.raster_verticies[f0]
+                rv1 : base.RasterVertex = renderer.raster_verticies[f1]
+                rv2 : base.RasterVertex = renderer.raster_verticies[f2]        
+                
+                cull_slice_triangle(renderer, rv0, rv1, rv2)
+                
+                for j := 0; j < len(renderer.clip_buffer); j +=3
+                {
+                    out0 : base.RasterVertex = renderer.clip_buffer[j]
+                    out1 : base.RasterVertex = renderer.clip_buffer[j + 1]
+                    out2 : base.RasterVertex = renderer.clip_buffer[j + 2]
+                    
+                    // perspective division
+                    out0.position /= out0.position.w
+                    out1.position /= out1.position.w
+                    out2.position /= out2.position.w
+                    
+                    // create 2d geometry coordinates
+                    s0 : base.ScreenCoord = {int((out0.position.x + 1) * half_width), int((out0.position.y + 1) * half_height)}
+                    s1 : base.ScreenCoord = {int((out1.position.x + 1) * half_width), int((out1.position.y + 1) * half_height)}
+                    s2 : base.ScreenCoord = {int((out2.position.x + 1) * half_width), int((out2.position.y + 1) * half_height)}
+                    
+                    // calculate area and skip backfacing triangles
+                    area : f32 = total_area(s0, s1, s2)
+                    if backface_culling && area > 0 {continue}
+                    
+                    f0 : base.FragCoord = {out0.position.z, out0.light_color, out0.uv, out0.normal}
+                    f1 : base.FragCoord = {out1.position.z, out1.light_color, out1.uv, out1.normal}
+                    f2 : base.FragCoord = {out2.position.z, out2.light_color, out2.uv, out2.normal}
+                    
+                    // create final triangle for binning
+                    tri : base.RasterTriangle = {s0, s1, s2, f0, f1, f2, global_tex_idx, area}
+                    
+                    // get triangle bounds and clamp to screen width and height
+                    x_min := math.max(math.min(math.min(s0.x, s1.x), s2.x), 0)
+                    x_max := math.min(math.max(math.max(s0.x, s1.x), s2.x), int(renderer.render_width - 1))
+                    y_min := math.max(math.min(math.min(s0.y, s1.y), s2.y), 0)
+                    y_max := math.min(math.max(math.max(s0.y, s1.y), s2.y), int(renderer.render_height - 1))
+                    
+                    // find which bins each triangle crosses (shift by X where 2^X == tile_size)
+                    // default tile size is 32, so x is 5 or 2^5 which == 32
+                    start_x := x_min >> 5
+                    start_y := y_min >> 5
+                    end_x := x_max >> 5
+                    end_y := y_max >> 5
+                    
+                    // iterate all possible bins of each triangle and place triangles
+                    for y := start_y; y <= end_y; y += 1
+                    {
+                        for x := start_x; x <= end_x; x += 1
+                        {
+                            append(&renderer.tile_bins[y * int(renderer.tile_x) + x], tri)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+
+    
+
+    
+
+    
+
+}
+
 begin_draw :: proc(renderer : ^Renderer)
 {
     clear(&renderer.textures)

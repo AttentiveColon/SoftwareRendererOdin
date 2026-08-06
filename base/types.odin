@@ -85,6 +85,18 @@ Mesh :: struct
     face_groups : []FaceGroup,
 }
 
+NewMesh :: struct
+{
+    verticies : []Vertex,
+}
+
+Model :: struct
+{
+    meshes : []NewMesh,
+    textures : []Texture,
+    tex_to_mesh_index : []int,
+}
+
 destroy_mesh :: proc(mesh : ^Mesh)
 {
     delete(mesh.vertices)

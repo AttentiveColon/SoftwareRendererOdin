@@ -3,6 +3,7 @@ package main
 import "display"
 import "renderer"
 import "base"
+import "asset"
 import "core:math/linalg"
 import "core:log"
 import "core:prof/spall"
@@ -54,6 +55,13 @@ run :: proc(program : Program)
         program.title,
     )
     defer display.close(d)
+
+    asset_manager : asset.Manager = asset.create()
+    defer asset.close(&asset_manager)
+
+    // testing model loading
+    leon_model := asset.load(&asset_manager, "assets/leon.obj")
+    
     
     r : Renderer = renderer.create(program.render_width, program.render_height, &spall_ctx, &spall_buffer)
     defer renderer.close(&r)
@@ -95,7 +103,8 @@ run :: proc(program : Program)
                     //append(&model_matricies, translation)
                     {
                         //spall.SCOPED_EVENT(&spall_ctx, &spall_buffer, "raster_single")
-                        renderer.draw_mesh(&r, &mesh, translation, view_proj)
+                        //renderer.draw_mesh(&r, &mesh, translation, view_proj)
+                        renderer.draw_model(&r, leon_model, translation, view_proj)
                     }
                 }
             }

@@ -8,7 +8,7 @@ import "core:math/linalg"
 import "core:log"
 import "core:prof/spall"
 import "core:sync"
-
+import "core:math"
 
 
 Display :: display.Display
@@ -30,7 +30,7 @@ Program :: struct
 
 create_program :: proc() -> Program
 {
-    render_scale : i32 = 1
+    render_scale : i32 = 2
     window_scale : i32 = 3
     return {
         render_scale,           // render scale
@@ -42,6 +42,23 @@ create_program :: proc() -> Program
         0,                     // frame target (0 for uncapped)
         "title"                 // window title
     }
+}
+
+// TEST: vertex stage
+wobbly :: proc(v : base.Vertex, time : f32) -> base.Vertex
+{
+    vertex := v
+    vertex.x += math.sin(time * 0.0005 * vertex.y) * 0.250
+    return vertex
+}
+
+// TEST: fragment stage
+tint_and_depth :: proc(in_frag : base.FragmentIn, tick : f32) -> base.FragmentOut
+{
+    sample := base.sample_texture(in_frag.tex, in_frag.uv.x, in_frag.uv.y)
+    red_tint : base.Color = {math.sin(tick * 0.001) * 1.0, math.cos(tick * 0.005) * 0.5, 0.05, 1.0}
+    depth : f32 = in_frag.depth
+    return {sample * in_frag.color * red_tint, depth, false}
 }
 
 run :: proc(program : Program)
@@ -59,24 +76,22 @@ run :: proc(program : Program)
     asset_manager : asset.Manager = asset.create()
     defer asset.close(&asset_manager)
 
-    // testing model loading
-    leon_model := asset.load(&asset_manager, "assets/leon.obj")
-    
-    
+    //model := asset.load2(&asset_manager, "assets/Sponza/gltf/Sponza.gltf", ccw_winding=false)
+    //model := asset.load2(&asset_manager, "assets/Untitled.glb", ccw_winding=false)
+    //model := asset.load2(&asset_manager, "assets/ABeautifulGame.glb", ccw_winding=false)
+    model2 := asset.load2(&asset_manager, "assets/leon.glb")
+    model := asset.load2(&asset_manager, "assets/VirtualCity.glb")
+       
     r : Renderer = renderer.create(program.render_width, program.render_height, &spall_ctx, &spall_buffer)
     defer renderer.close(&r)
-
-    mesh := base.load_obj("assets/leon.obj")
-    defer base.destroy_mesh(&mesh)
-
 
     camera := base.create_camera(
         {20,-20,20}, {0,0,0}, 3.14*0.5, 
         f32(program.render_width)/f32(program.render_height),
-        0.001, 1000.0
+        0.001, 2000.0
     )
 
-    trs_matrix : matrix[4,4]f32 = linalg.matrix4_scale_f32({0.5, 0.5, 0.5})
+    trs_matrix : matrix[4,4]f32 = linalg.matrix4_scale_f32({1.5, 1.5, 1.5})
     mvp_matrix : matrix[4,4]f32 = camera.proj_matrix * camera.view_matrix * trs_matrix
     renderer.update_light_position(&r, {100, -15, 0})
     model_matricies := make([dynamic]matrix[4,4]f32)
@@ -94,25 +109,23 @@ run :: proc(program : Program)
 
         view_proj := base.get_view_projection(&camera)
 
+        
+        for i in 0..<1
         {
-            for i in 0..<10
+            for j in 0..<1
             {
-                for j in 0..<10
-                {
-                    translation := base.translate({f32(i * 15), 0, -f32(j * 15)}, trs_matrix)
-                    //append(&model_matricies, translation)
-                    {
-                        //spall.SCOPED_EVENT(&spall_ctx, &spall_buffer, "raster_single")
-                        //renderer.draw_mesh(&r, &mesh, translation, view_proj)
-                        renderer.draw_model(&r, leon_model, translation, view_proj)
-                    }
-                }
+                translation := base.translate({f32(i * 15), 0, -f32(j * 15)}, trs_matrix)
+                renderer.set_fragment_pipeline(&r, tint_and_depth)
+                renderer.draw_model(&r, model, translation, view_proj)
+                renderer.reset_fragment_pipeline(&r)
+                renderer.set_vertex_pipeline(&r, wobbly)
+                renderer.draw_model(&r, model2, translation, view_proj)
+                renderer.reset_vertex_pipeline(&r)
             }
         }
+        
 
-        {
-            renderer.end_draw(&r)
-        }
+        renderer.end_draw(&r)
         if display.present(d, renderer.get_framebuffer(&r)) {break}
     }
 }

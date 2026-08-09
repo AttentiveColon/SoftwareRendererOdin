@@ -8,9 +8,10 @@ import "core:thread"
 import "core:os"
 import "core:math/linalg"
 import "core:log"
-
+import "core:time"
 
 backface_culling : bool : true
+
 
 Renderer :: struct
 {
@@ -36,6 +37,22 @@ Renderer :: struct
 
     spall_ctx : ^spall.Context,
     spall_buffer: ^spall.Buffer,
+
+    tick : f32,
+    vertex_proc : base.vertex_procedure,
+    frag_proc : base.fragment_procedure,
+}
+
+default_vertex_procedure :: proc(vertex : base.Vertex, tick : f32) -> base.Vertex
+{
+    return vertex
+}
+
+default_fragment_procedure :: proc(in_frag : base.FragmentIn, tick : f32) -> base.FragmentOut
+{
+    sample := base.sample_texture(in_frag.tex, in_frag.uv.x, in_frag.uv.y)
+    depth := in_frag.depth
+    return {sample * in_frag.color, depth, false}
 }
 
 Render_Thread :: struct
@@ -119,7 +136,7 @@ create :: proc(render_width, render_height : i32, spall_ctx : ^spall.Context, sp
 
     // allocate persistent thread memory
     num_tiles := tile_x * tile_y
-    
+    tick : f32 = 0.0
     
     return {
         render_width, 
@@ -139,6 +156,9 @@ create :: proc(render_width, render_height : i32, spall_ctx : ^spall.Context, sp
         thread_pool_size,
         spall_ctx,
         spall_buffer,
+        tick,
+        default_vertex_procedure,
+        default_fragment_procedure,
     }
 }
 
@@ -190,6 +210,7 @@ draw_triangle_tile :: proc(renderer : ^Renderer, tri : base.RasterTriangle, tile
     c0, c1, c2 : base.Color = tri.f0.c, tri.f1.c, tri.f2.c
     u0, u1, u2 : f32 = tri.f0.uv.x, tri.f1.uv.x, tri.f2.uv.x
     v0, v1, v2 : f32 = tri.f0.uv.y, tri.f1.uv.y, tri.f2.uv.y
+    inv_w0, inv_w1, inv_w2 : f32 = tri.f0.inv_w, tri.f1.inv_w, tri.f2.inv_w
 
     epsilon : f32 = -0.0001
     for y := y_min; y <= y_max; y+=1
@@ -205,17 +226,34 @@ draw_triangle_tile :: proc(renderer : ^Renderer, tri : base.RasterTriangle, tile
 
                 if pixel_depth < renderer.depthbuffer[buffer_index]
                 {
-                    renderer.depthbuffer[buffer_index] = pixel_depth
                     light_color : base.Color = (c0 * alpha) + (c1 * beta) + (c2 * gamma)
 
                     // interpolate uvs and sample
                     uvx : f32 = (u0 * alpha) + (u1 * beta) + (u2 * gamma)
                     uvy : f32 = (v0 * alpha) + (v1 * beta) + (v2 * gamma)
-                    sample : base.Color = base.sample_texture(tex, uvx, uvy)
+                    interp_inv_w := (inv_w0 * alpha) + (inv_w1 * beta) + (inv_w2 * gamma)
+                    perspective_uv := base.V2{uvx / interp_inv_w, uvy / interp_inv_w}
 
-                    // combine and write to buffer
-                    final_color : base.Color = sample * light_color
-                    renderer.framebuffer[buffer_index] = base.to_uint32_color(final_color)
+                    frag_in := base.FragmentIn{
+                        screen_pos = {i32(x), i32(y)},
+                        depth = pixel_depth,
+                        uv = perspective_uv,
+                        color = light_color,
+                        tex = &tex,
+                    }
+
+                    frag_out : base.FragmentOut = tri.frag_proc(frag_in, renderer.tick)
+                    if !frag_out.discard
+                    {
+                        renderer.depthbuffer[buffer_index] = frag_out.depth
+                        renderer.framebuffer[buffer_index] = base.to_uint32_color(frag_out.color)
+                    }
+                    // sample : base.Color = base.sample_texture(tex, uvx / interp_inv_w, uvy / interp_inv_w)
+                    // //sample : base.Color = base.sample_texture(tex, uvx, uvy)
+
+                    // // combine and write to buffer
+                    // final_color : base.Color = sample * light_color
+                    // renderer.framebuffer[buffer_index] = base.to_uint32_color(final_color)
                 }
             }
             // step one pixel to the right
@@ -318,124 +356,124 @@ calculate_light :: proc(renderer : ^Renderer, v : base.Vertex, model_matrix : ma
     return base.Color{total_light, total_light, total_light, 1.0}
 }
 
-draw_mesh :: proc(renderer : ^Renderer, mesh : ^base.Mesh, model_matrix, view_proj : matrix[4,4]f32)
-{
-    mvp := view_proj * model_matrix
+// draw_mesh :: proc(renderer : ^Renderer, mesh : ^base.Mesh, model_matrix, view_proj : matrix[4,4]f32)
+// {
+//     mvp := view_proj * model_matrix
 
-    // TODO: Future optimization -> Frustrum Culling
-    // if !is_in_frustrum(mesh.bounding_sphere, mvp) {continue}
+//     // TODO: Future optimization -> Frustrum Culling
+//     // if !is_in_frustrum(mesh.bounding_sphere, mvp) {continue}
 
-    current_face_index : int = 0
-    half_width, half_height : f32 = f32(renderer.render_width / 2), f32(renderer.render_height / 2)
+//     current_face_index : int = 0
+//     half_width, half_height : f32 = f32(renderer.render_width / 2), f32(renderer.render_height / 2)
 
-    // preallocate if mesh array is larger than current raster vertex dynamic array
-    if len(mesh.vertices) > len(renderer.raster_verticies)
-    {
-        reserve(&renderer.raster_verticies, len(mesh.vertices))
-        resize(&renderer.raster_verticies, len(mesh.vertices))
-    }
+//     // preallocate if mesh array is larger than current raster vertex dynamic array
+//     if len(mesh.vertices) > len(renderer.raster_verticies)
+//     {
+//         reserve(&renderer.raster_verticies, len(mesh.vertices))
+//         resize(&renderer.raster_verticies, len(mesh.vertices))
+//     }
 
-    // hoist texture lookups so it is only calculated once for entire draw call
-    group_texture_indicies := make([]int, len(mesh.face_groups), context.temp_allocator)
-    for group, i in mesh.face_groups 
-    {
-        if _, ok := mesh.materials[group.material_name]; !ok {
-            log.fatal("Material doesn't exist in map!")
-        }
-        tex := mesh.materials[group.material_name].texture
-        group_texture_indicies[i] = get_or_add_texture(&renderer.textures, tex)
-    }
+//     // hoist texture lookups so it is only calculated once for entire draw call
+//     group_texture_indicies := make([]int, len(mesh.face_groups), context.temp_allocator)
+//     for group, i in mesh.face_groups 
+//     {
+//         if _, ok := mesh.materials[group.material_name]; !ok {
+//             log.fatal("Material doesn't exist in map!")
+//         }
+//         tex := mesh.materials[group.material_name].texture
+//         group_texture_indicies[i] = get_or_add_texture(&renderer.textures, tex)
+//     }
 
-    // precalculate vertices to avoid recalculating shared verticies
-    {
+//     // precalculate vertices to avoid recalculating shared verticies
+//     {
 
-        //spall.SCOPED_EVENT(renderer.spall_ctx, renderer.spall_buffer, "Calculate Lighting")
-        for vertex, idx in mesh.vertices
-        {
-            raster_vertex : base.RasterVertex = {
-                position = mvp * base.V4{vertex.x, vertex.y, vertex.z, 1.0},
-                light_color = calculate_light(renderer, vertex, model_matrix),
-                normal = {vertex.nx, vertex.ny, vertex.nz},
-                uv = {vertex.u, vertex.v},
-            }
-            renderer.raster_verticies[idx] = raster_vertex // this might break
+//         //spall.SCOPED_EVENT(renderer.spall_ctx, renderer.spall_buffer, "Calculate Lighting")
+//         for vertex, idx in mesh.vertices
+//         {
+//             raster_vertex : base.RasterVertex = {
+//                 position = mvp * base.V4{vertex.x, vertex.y, vertex.z, 1.0},
+//                 light_color = calculate_light(renderer, vertex, model_matrix),
+//                 normal = {vertex.nx, vertex.ny, vertex.nz},
+//                 uv = {vertex.u, vertex.v},
+//             }
+//             renderer.raster_verticies[idx] = raster_vertex // this might break
             
-            // if the above breaks, clear array and then call this append below 
-            //append(&renderer.raster_verticies, raster_vertex)
-        }
-    }
+//             // if the above breaks, clear array and then call this append below 
+//             //append(&renderer.raster_verticies, raster_vertex)
+//         }
+//     }
 
-    // calculate and render face groups
-    {
-        //spall.SCOPED_EVENT(renderer.spall_ctx, renderer.spall_buffer, "Process Faces")
-        for group, group_idx in mesh.face_groups
-        {
-             texture_index := group_texture_indicies[group_idx]
+//     // calculate and render face groups
+//     {
+//         //spall.SCOPED_EVENT(renderer.spall_ctx, renderer.spall_buffer, "Process Faces")
+//         for group, group_idx in mesh.face_groups
+//         {
+//              texture_index := group_texture_indicies[group_idx]
             
-            // collect and distribute triangles to associated tile bins
-            for ; current_face_index <= group.last_face_index; current_face_index+=1
-            {
-                face : base.Face = mesh.faces[current_face_index]
+//             // collect and distribute triangles to associated tile bins
+//             for ; current_face_index <= group.last_face_index; current_face_index+=1
+//             {
+//                 face : base.Face = mesh.faces[current_face_index]
                 
-                rv0 : base.RasterVertex = renderer.raster_verticies[face.f0]
-                rv1 : base.RasterVertex = renderer.raster_verticies[face.f1]
-                rv2 : base.RasterVertex = renderer.raster_verticies[face.f2]        
+//                 rv0 : base.RasterVertex = renderer.raster_verticies[face.f0]
+//                 rv1 : base.RasterVertex = renderer.raster_verticies[face.f1]
+//                 rv2 : base.RasterVertex = renderer.raster_verticies[face.f2]        
                 
-                cull_slice_triangle(renderer, rv0, rv1, rv2)
+//                 cull_slice_triangle(renderer, rv0, rv1, rv2)
                 
-                for i := 0; i < len(renderer.clip_buffer); i+=3
-                {
-                    out0 : base.RasterVertex = renderer.clip_buffer[i]
-                    out1 : base.RasterVertex = renderer.clip_buffer[i + 1]
-                    out2 : base.RasterVertex = renderer.clip_buffer[i + 2]
+//                 for i := 0; i < len(renderer.clip_buffer); i+=3
+//                 {
+//                     out0 : base.RasterVertex = renderer.clip_buffer[i]
+//                     out1 : base.RasterVertex = renderer.clip_buffer[i + 1]
+//                     out2 : base.RasterVertex = renderer.clip_buffer[i + 2]
                     
-                    // perspective division
-                    out0.position /= out0.position.w
-                    out1.position /= out1.position.w
-                    out2.position /= out2.position.w
+//                     // perspective division
+//                     out0.position /= out0.position.w
+//                     out1.position /= out1.position.w
+//                     out2.position /= out2.position.w
                     
-                    // create 2d geometry coordinates
-                    s0 : base.ScreenCoord = {int((out0.position.x + 1) * half_width), int((out0.position.y + 1) * half_height)}
-                    s1 : base.ScreenCoord = {int((out1.position.x + 1) * half_width), int((out1.position.y + 1) * half_height)}
-                    s2 : base.ScreenCoord = {int((out2.position.x + 1) * half_width), int((out2.position.y + 1) * half_height)}
+//                     // create 2d geometry coordinates
+//                     s0 : base.ScreenCoord = {int((out0.position.x + 1) * half_width), int((out0.position.y + 1) * half_height)}
+//                     s1 : base.ScreenCoord = {int((out1.position.x + 1) * half_width), int((out1.position.y + 1) * half_height)}
+//                     s2 : base.ScreenCoord = {int((out2.position.x + 1) * half_width), int((out2.position.y + 1) * half_height)}
                     
-                    // calculate area and skip backfacing triangles
-                    area : f32 = total_area(s0, s1, s2)
-                    if backface_culling && area > 0 {continue}
+//                     // calculate area and skip backfacing triangles
+//                     area : f32 = total_area(s0, s1, s2)
+//                     if backface_culling && area > 0 {continue}
                     
-                    f0 : base.FragCoord = {out0.position.z, out0.light_color, out0.uv, out0.normal}
-                    f1 : base.FragCoord = {out1.position.z, out1.light_color, out1.uv, out1.normal}
-                    f2 : base.FragCoord = {out2.position.z, out2.light_color, out2.uv, out2.normal}
+//                     f0 : base.FragCoord = {out0.position.z, out0.light_color, out0.uv, out0.normal}
+//                     f1 : base.FragCoord = {out1.position.z, out1.light_color, out1.uv, out1.normal}
+//                     f2 : base.FragCoord = {out2.position.z, out2.light_color, out2.uv, out2.normal}
                     
-                    // create final triangle for binning
-                    tri : base.RasterTriangle = {s0, s1, s2, f0, f1, f2, texture_index, area}
+//                     // create final triangle for binning
+//                     tri : base.RasterTriangle = {s0, s1, s2, f0, f1, f2, texture_index, area}
                     
-                    // get triangle bounds and clamp to screen width and height
-                    x_min := math.max(math.min(math.min(s0.x, s1.x), s2.x), 0)
-                    x_max := math.min(math.max(math.max(s0.x, s1.x), s2.x), int(renderer.render_width - 1))
-                    y_min := math.max(math.min(math.min(s0.y, s1.y), s2.y), 0)
-                    y_max := math.min(math.max(math.max(s0.y, s1.y), s2.y), int(renderer.render_height - 1))
+//                     // get triangle bounds and clamp to screen width and height
+//                     x_min := math.max(math.min(math.min(s0.x, s1.x), s2.x), 0)
+//                     x_max := math.min(math.max(math.max(s0.x, s1.x), s2.x), int(renderer.render_width - 1))
+//                     y_min := math.max(math.min(math.min(s0.y, s1.y), s2.y), 0)
+//                     y_max := math.min(math.max(math.max(s0.y, s1.y), s2.y), int(renderer.render_height - 1))
                     
-                    // find which bins each triangle crosses (shift by X where 2^X == tile_size)
-                    // default tile size is 32, so x is 5 or 2^5 which == 32
-                    start_x := x_min >> 5
-                    start_y := y_min >> 5
-                    end_x := x_max >> 5
-                    end_y := y_max >> 5
+//                     // find which bins each triangle crosses (shift by X where 2^X == tile_size)
+//                     // default tile size is 32, so x is 5 or 2^5 which == 32
+//                     start_x := x_min >> 5
+//                     start_y := y_min >> 5
+//                     end_x := x_max >> 5
+//                     end_y := y_max >> 5
                     
-                    // iterate all possible bins of each triangle and place triangles
-                    for y := start_y; y <= end_y; y += 1
-                    {
-                        for x := start_x; x <= end_x; x += 1
-                        {
-                            append(&renderer.tile_bins[y * int(renderer.tile_x) + x], tri)
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
+//                     // iterate all possible bins of each triangle and place triangles
+//                     for y := start_y; y <= end_y; y += 1
+//                     {
+//                         for x := start_x; x <= end_x; x += 1
+//                         {
+//                             append(&renderer.tile_bins[y * int(renderer.tile_x) + x], tri)
+//                         }
+//                     }
+//                 }
+//             }
+//         }
+//     }
+// }
 
 draw_model :: proc(renderer : ^Renderer, model : ^base.Model, model_matrix, view_proj : matrix[4,4]f32)
 {
@@ -466,18 +504,18 @@ draw_model :: proc(renderer : ^Renderer, model : ^base.Model, model_matrix, view
         {
 
             //spall.SCOPED_EVENT(renderer.spall_ctx, renderer.spall_buffer, "Calculate Lighting")
-            for vertex, idx in mesh.verticies
+            for v, idx in mesh.verticies
             {
+                // vertex shader stage procedure
+                vertex := renderer.vertex_proc(v, renderer.tick)
+                
                 raster_vertex : base.RasterVertex = {
                     position = mvp * base.V4{vertex.x, vertex.y, vertex.z, 1.0},
                     light_color = calculate_light(renderer, vertex, model_matrix),
                     normal = {vertex.nx, vertex.ny, vertex.nz},
                     uv = {vertex.u, vertex.v},
                 }
-                renderer.raster_verticies[idx] = raster_vertex // this might break
-
-                // if the above breaks, clear array and then call this append below 
-                //append(&renderer.raster_verticies, raster_vertex)
+                renderer.raster_verticies[idx] = raster_vertex 
             }
         }
 
@@ -503,11 +541,21 @@ draw_model :: proc(renderer : ^Renderer, model : ^base.Model, model_matrix, view
                     out0 : base.RasterVertex = renderer.clip_buffer[j]
                     out1 : base.RasterVertex = renderer.clip_buffer[j + 1]
                     out2 : base.RasterVertex = renderer.clip_buffer[j + 2]
+
+                    // calculate invW for perspective correct textures
+                    inv_w0 := 1.0 / out0.position.w
+                    inv_w1 := 1.0 / out1.position.w
+                    inv_w2 := 1.0 / out2.position.w
+
+                    // premultiply uvs by invW
+                    out0.uv *= inv_w0
+                    out1.uv *= inv_w1
+                    out2.uv *= inv_w2
                     
-                    // perspective division
-                    out0.position /= out0.position.w
-                    out1.position /= out1.position.w
-                    out2.position /= out2.position.w
+                    // perspective division by multiplication
+                    out0.position *= inv_w0
+                    out1.position *= inv_w1
+                    out2.position *= inv_w2
                     
                     // create 2d geometry coordinates
                     s0 : base.ScreenCoord = {int((out0.position.x + 1) * half_width), int((out0.position.y + 1) * half_height)}
@@ -518,12 +566,12 @@ draw_model :: proc(renderer : ^Renderer, model : ^base.Model, model_matrix, view
                     area : f32 = total_area(s0, s1, s2)
                     if backface_culling && area > 0 {continue}
                     
-                    f0 : base.FragCoord = {out0.position.z, out0.light_color, out0.uv, out0.normal}
-                    f1 : base.FragCoord = {out1.position.z, out1.light_color, out1.uv, out1.normal}
-                    f2 : base.FragCoord = {out2.position.z, out2.light_color, out2.uv, out2.normal}
+                    f0 : base.FragCoord = {out0.position.z, out0.light_color, out0.uv, out0.normal, inv_w0}
+                    f1 : base.FragCoord = {out1.position.z, out1.light_color, out1.uv, out1.normal, inv_w1}
+                    f2 : base.FragCoord = {out2.position.z, out2.light_color, out2.uv, out2.normal, inv_w2}
                     
                     // create final triangle for binning
-                    tri : base.RasterTriangle = {s0, s1, s2, f0, f1, f2, global_tex_idx, area}
+                    tri : base.RasterTriangle = {s0, s1, s2, f0, f1, f2, global_tex_idx, area, renderer.frag_proc}
                     
                     // get triangle bounds and clamp to screen width and height
                     x_min := math.max(math.min(math.min(s0.x, s1.x), s2.x), 0)
@@ -569,6 +617,7 @@ begin_draw :: proc(renderer : ^Renderer)
         clear(&renderer.tile_bins[i])
     }
     clear_depth_buffer(renderer)
+    renderer.tick += 1.0
 }
 
 end_draw :: proc(renderer : ^Renderer)
@@ -589,6 +638,26 @@ end_draw :: proc(renderer : ^Renderer)
             break
         }
     }
+}
+
+set_vertex_pipeline :: proc(renderer : ^Renderer, vertex_proc : base.vertex_procedure)
+{
+    renderer.vertex_proc = vertex_proc
+}
+
+reset_vertex_pipeline :: proc(renderer : ^Renderer)
+{
+    renderer.vertex_proc = default_vertex_procedure
+}
+
+set_fragment_pipeline :: proc(renderer : ^Renderer, frag_proc : base.fragment_procedure)
+{
+    renderer.frag_proc = frag_proc
+}
+
+reset_fragment_pipeline :: proc(renderer : ^Renderer)
+{
+    renderer.frag_proc = default_fragment_procedure
 }
 
 update_light_position :: proc(renderer : ^Renderer, position : base.V3)

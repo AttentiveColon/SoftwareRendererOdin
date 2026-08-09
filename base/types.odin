@@ -1,6 +1,5 @@
 package base
 
-
 V4 :: [4]f32
 V3 :: [3]f32
 V2 :: [2]f32
@@ -8,6 +7,25 @@ V2 :: [2]f32
 M4 :: matrix[4,4]f32
 
 Color :: V4
+
+vertex_procedure :: proc(Vertex, f32)-> Vertex
+fragment_procedure :: proc(FragmentIn, f32) -> FragmentOut
+
+FragmentIn :: struct
+{
+    screen_pos : [2]i32,
+    depth : f32,
+    uv : V2,
+    color : Color,
+    tex : ^Texture
+}
+
+FragmentOut :: struct
+{
+    color : Color,
+    depth : f32,
+    discard : bool,
+}
 
 Face :: struct
 {
@@ -20,6 +38,7 @@ FragCoord :: struct
     c : Color,
     uv: V2,
     normal: V3,
+    inv_w : f32,
 }
 
 Point :: struct
@@ -57,6 +76,7 @@ RasterTriangle :: struct
     f0, f1, f2 : FragCoord,
     texture_index : int,
     area : f32,
+    frag_proc : fragment_procedure
 }
 
 Vertex :: struct

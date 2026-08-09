@@ -36,8 +36,12 @@ unload_texture :: proc(texture : ^Texture)
     delete(texture.name)
 }
 
-sample_texture :: proc(texture : Texture, u, v : f32, clamp_edges : bool = false) -> Color
+sample_texture :: proc(texture : ^Texture, u, v : f32, clamp_edges : bool = false) -> Color
 {
+    if len(texture.pixels) == 0 {
+        // if empty return fallback color
+        return {1.0, 0.0, 0.0, 1.0}
+    }
     u := u
     v := v
     if clamp_edges

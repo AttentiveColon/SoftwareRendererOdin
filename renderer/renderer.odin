@@ -243,7 +243,7 @@ draw_triangle_tile :: proc(renderer : ^Renderer, tri : base.RasterTriangle, tile
                     }
 
                     frag_out : base.FragmentOut = tri.frag_proc(frag_in, renderer.tick)
-                    if !frag_out.discard
+                    if !frag_out.discard && frag_out.depth < renderer.depthbuffer[buffer_index]
                     {
                         renderer.depthbuffer[buffer_index] = frag_out.depth
                         renderer.framebuffer[buffer_index] = base.to_uint32_color(frag_out.color)

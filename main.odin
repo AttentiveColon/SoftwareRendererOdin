@@ -101,7 +101,7 @@ run :: proc(program : Program)
     {   
         free_all(context.temp_allocator)
         clear(&model_matricies)
-        renderer.clear_buffer(&r, {1.0, 1.0, 1.0, 1.0})
+        renderer.clear_buffer(&r, {1.0, 0.0, 1.0, 1.0})
         renderer.begin_draw(&r)
 
         direction, delta := base.process_input(0.1)

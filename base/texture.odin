@@ -1,6 +1,6 @@
 package base
 
-import rl "vendor:raylib"
+import stbi "vendor:stb/image"
 import "core:log"
 import "core:math"
 import "core:strings"
@@ -15,19 +15,25 @@ Texture :: struct
 load_texture :: proc(filepath : string) -> Texture
 {
     filepath_cstring := strings.clone_to_cstring(filepath, context.temp_allocator)
-    image := rl.LoadImage(filepath_cstring)
-    defer rl.UnloadImage(image)
-    if image.data != nil
+
+    width, height, channels : i32
+    // force 4 channel RGBA
+    img_data := stbi.loadf(filepath_cstring, &width, &height, &channels, 4)
+
+    if img_data == nil
     {
-        rl.ImageFormat(&image, rl.PixelFormat.UNCOMPRESSED_R32G32B32A32)
+        log.panic("failed to load image data!")
     }
-    else { log.panic("Failed to load image data!") }
-    total_pixels := image.width * image.height
-    img_ptr := cast([^][4]f32) image.data
-    raylib_slice := img_ptr[:total_pixels]
-    odin_slice := make([][4]f32, total_pixels)
-    copy(odin_slice,  raylib_slice)
-    return {strings.clone(filepath), image.width, image.height, odin_slice}
+    defer stbi.image_free(img_data)
+
+    total_pixels := width * height
+    img_ptr := cast([^]V4)img_data
+    stbi_slice := img_ptr[:total_pixels]
+
+    odin_slice := make([]V4, total_pixels)
+    copy(odin_slice, stbi_slice)
+
+    return {strings.clone(filepath), width, height, odin_slice}
 }
 
 unload_texture :: proc(texture : ^Texture)

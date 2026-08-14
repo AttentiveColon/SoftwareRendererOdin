@@ -83,7 +83,7 @@ create :: proc(
     }
     else
     {
-        window_surface := sdl2.GetWindowSurface(window)
+        window_surface = sdl2.GetWindowSurface(window)
         if window_surface == nil
         {
             log.fatalf("Failed to get window surface: %s", sdl2.GetError())

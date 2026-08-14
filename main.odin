@@ -30,7 +30,7 @@ Program :: struct
 
 create_program :: proc() -> Program
 {
-    render_scale : i32 = 2
+    render_scale : i32 = 1
     window_scale : i32 = 3
     return {
         render_scale,           // render scale

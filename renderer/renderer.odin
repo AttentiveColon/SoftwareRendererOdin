@@ -9,6 +9,7 @@ import "core:os"
 import "core:math/linalg"
 import "core:log"
 import "core:time"
+import "core:sync"
 
 backface_culling : bool : true
 
@@ -41,6 +42,8 @@ Renderer :: struct
     tick : f32,
     vertex_proc : base.vertex_procedure,
     frag_proc : base.fragment_procedure,
+
+    next_tile_index : int,
 }
 
 default_vertex_procedure :: proc(vertex : base.Vertex, tick : f32) -> base.Vertex
@@ -81,22 +84,32 @@ render_task :: proc(task : thread.Task)
     // cast task.data to thread data type
     data := cast(^Render_Thread)task.data
     renderer := data.renderer
-    index := data.index
     context.logger = data.logger
-
-    tile_x_min := (index % renderer.tile_x) * renderer.tile_size
-    tile_x_max := tile_x_min + renderer.tile_size - 1
-    tile_y_min := (index / renderer.tile_x) * renderer.tile_size
-    tile_y_max := tile_y_min + renderer.tile_size - 1
-
-    for j := 0; j < len(renderer.tile_bins[index]); j += 1
+    
+    for 
     {
-        draw_triangle_tile(
-            renderer,
-            renderer.tile_bins[index][j], 
-            tile_x_min, tile_x_max, 
-            tile_y_min, tile_y_max
-        )
+        index := sync.atomic_add(&renderer.next_tile_index, 1)
+
+        // index is out of bounds once all tiles have been processed
+        if index >= len(renderer.tile_bins)
+        {
+            break
+        }
+
+        tile_x_min := (i32(index) % renderer.tile_x) * renderer.tile_size
+        tile_x_max := tile_x_min + renderer.tile_size - 1
+        tile_y_min := (i32(index) / renderer.tile_x) * renderer.tile_size
+        tile_y_max := tile_y_min + renderer.tile_size - 1
+        
+        for j := 0; j < len(renderer.tile_bins[index]); j += 1
+        {
+            draw_triangle_tile(
+                renderer,
+                renderer.tile_bins[index][j], 
+                tile_x_min, tile_x_max, 
+                tile_y_min, tile_y_max
+            )
+        }
     }
 }
 
@@ -159,6 +172,7 @@ create :: proc(render_width, render_height : i32, spall_ctx : ^spall.Context, sp
         tick,
         default_vertex_procedure,
         default_fragment_procedure,
+        0,
     }
 }
 
@@ -356,125 +370,6 @@ calculate_light :: proc(renderer : ^Renderer, v : base.Vertex, model_matrix : ma
     return base.Color{total_light, total_light, total_light, 1.0}
 }
 
-// draw_mesh :: proc(renderer : ^Renderer, mesh : ^base.Mesh, model_matrix, view_proj : matrix[4,4]f32)
-// {
-//     mvp := view_proj * model_matrix
-
-//     // TODO: Future optimization -> Frustrum Culling
-//     // if !is_in_frustrum(mesh.bounding_sphere, mvp) {continue}
-
-//     current_face_index : int = 0
-//     half_width, half_height : f32 = f32(renderer.render_width / 2), f32(renderer.render_height / 2)
-
-//     // preallocate if mesh array is larger than current raster vertex dynamic array
-//     if len(mesh.vertices) > len(renderer.raster_verticies)
-//     {
-//         reserve(&renderer.raster_verticies, len(mesh.vertices))
-//         resize(&renderer.raster_verticies, len(mesh.vertices))
-//     }
-
-//     // hoist texture lookups so it is only calculated once for entire draw call
-//     group_texture_indicies := make([]int, len(mesh.face_groups), context.temp_allocator)
-//     for group, i in mesh.face_groups 
-//     {
-//         if _, ok := mesh.materials[group.material_name]; !ok {
-//             log.fatal("Material doesn't exist in map!")
-//         }
-//         tex := mesh.materials[group.material_name].texture
-//         group_texture_indicies[i] = get_or_add_texture(&renderer.textures, tex)
-//     }
-
-//     // precalculate vertices to avoid recalculating shared verticies
-//     {
-
-//         //spall.SCOPED_EVENT(renderer.spall_ctx, renderer.spall_buffer, "Calculate Lighting")
-//         for vertex, idx in mesh.vertices
-//         {
-//             raster_vertex : base.RasterVertex = {
-//                 position = mvp * base.V4{vertex.x, vertex.y, vertex.z, 1.0},
-//                 light_color = calculate_light(renderer, vertex, model_matrix),
-//                 normal = {vertex.nx, vertex.ny, vertex.nz},
-//                 uv = {vertex.u, vertex.v},
-//             }
-//             renderer.raster_verticies[idx] = raster_vertex // this might break
-            
-//             // if the above breaks, clear array and then call this append below 
-//             //append(&renderer.raster_verticies, raster_vertex)
-//         }
-//     }
-
-//     // calculate and render face groups
-//     {
-//         //spall.SCOPED_EVENT(renderer.spall_ctx, renderer.spall_buffer, "Process Faces")
-//         for group, group_idx in mesh.face_groups
-//         {
-//              texture_index := group_texture_indicies[group_idx]
-            
-//             // collect and distribute triangles to associated tile bins
-//             for ; current_face_index <= group.last_face_index; current_face_index+=1
-//             {
-//                 face : base.Face = mesh.faces[current_face_index]
-                
-//                 rv0 : base.RasterVertex = renderer.raster_verticies[face.f0]
-//                 rv1 : base.RasterVertex = renderer.raster_verticies[face.f1]
-//                 rv2 : base.RasterVertex = renderer.raster_verticies[face.f2]        
-                
-//                 cull_slice_triangle(renderer, rv0, rv1, rv2)
-                
-//                 for i := 0; i < len(renderer.clip_buffer); i+=3
-//                 {
-//                     out0 : base.RasterVertex = renderer.clip_buffer[i]
-//                     out1 : base.RasterVertex = renderer.clip_buffer[i + 1]
-//                     out2 : base.RasterVertex = renderer.clip_buffer[i + 2]
-                    
-//                     // perspective division
-//                     out0.position /= out0.position.w
-//                     out1.position /= out1.position.w
-//                     out2.position /= out2.position.w
-                    
-//                     // create 2d geometry coordinates
-//                     s0 : base.ScreenCoord = {int((out0.position.x + 1) * half_width), int((out0.position.y + 1) * half_height)}
-//                     s1 : base.ScreenCoord = {int((out1.position.x + 1) * half_width), int((out1.position.y + 1) * half_height)}
-//                     s2 : base.ScreenCoord = {int((out2.position.x + 1) * half_width), int((out2.position.y + 1) * half_height)}
-                    
-//                     // calculate area and skip backfacing triangles
-//                     area : f32 = total_area(s0, s1, s2)
-//                     if backface_culling && area > 0 {continue}
-                    
-//                     f0 : base.FragCoord = {out0.position.z, out0.light_color, out0.uv, out0.normal}
-//                     f1 : base.FragCoord = {out1.position.z, out1.light_color, out1.uv, out1.normal}
-//                     f2 : base.FragCoord = {out2.position.z, out2.light_color, out2.uv, out2.normal}
-                    
-//                     // create final triangle for binning
-//                     tri : base.RasterTriangle = {s0, s1, s2, f0, f1, f2, texture_index, area}
-                    
-//                     // get triangle bounds and clamp to screen width and height
-//                     x_min := math.max(math.min(math.min(s0.x, s1.x), s2.x), 0)
-//                     x_max := math.min(math.max(math.max(s0.x, s1.x), s2.x), int(renderer.render_width - 1))
-//                     y_min := math.max(math.min(math.min(s0.y, s1.y), s2.y), 0)
-//                     y_max := math.min(math.max(math.max(s0.y, s1.y), s2.y), int(renderer.render_height - 1))
-                    
-//                     // find which bins each triangle crosses (shift by X where 2^X == tile_size)
-//                     // default tile size is 32, so x is 5 or 2^5 which == 32
-//                     start_x := x_min >> 5
-//                     start_y := y_min >> 5
-//                     end_x := x_max >> 5
-//                     end_y := y_max >> 5
-                    
-//                     // iterate all possible bins of each triangle and place triangles
-//                     for y := start_y; y <= end_y; y += 1
-//                     {
-//                         for x := start_x; x <= end_x; x += 1
-//                         {
-//                             append(&renderer.tile_bins[y * int(renderer.tile_x) + x], tri)
-//                         }
-//                     }
-//                 }
-//             }
-//         }
-//     }
-// }
-
 draw_model :: proc(renderer : ^Renderer, model : ^base.Model, model_matrix, view_proj : matrix[4,4]f32)
 {
     mvp := view_proj * model_matrix
@@ -622,11 +517,13 @@ begin_draw :: proc(renderer : ^Renderer)
 
 end_draw :: proc(renderer : ^Renderer)
 {
-    task_data := make([]Render_Thread, len(renderer.tile_bins), context.temp_allocator)
-    for _, index in renderer.tile_bins
+    renderer.next_tile_index = 0
+
+    task_data := make([]Render_Thread, renderer.thread_pool_size, context.temp_allocator)
+    for i := 0; i < renderer.thread_pool_size; i += 1
     {
-        task_data[index] = Render_Thread{renderer, i32(index), context.logger}
-        thread.pool_add_task(renderer.thread_pool, context.allocator, render_task, rawptr(&task_data[index]))
+        task_data[i] = Render_Thread{renderer, i32(i), context.logger}
+        thread.pool_add_task(renderer.thread_pool, context.allocator, render_task, rawptr(&task_data[i]))
     }
     thread.pool_finish(renderer.thread_pool)
 

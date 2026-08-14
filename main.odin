@@ -39,8 +39,8 @@ create_program :: proc() -> Program
         220 * render_scale,     // render height                
         320 * window_scale,     // window width
         240 * window_scale,     // window height
-        0,                     // frame target (0 for uncapped)
-        "title"                 // window title
+        0,                      // frame target (0 for uncapped)
+        "Odin Software Renderer"// window title
     }
 }
 
@@ -53,11 +53,11 @@ wobbly :: proc(v : base.Vertex, time : f32) -> base.Vertex
 }
 
 // TEST: fragment stage
-tint_and_depth :: proc(in_frag : base.FragmentIn, tick : f32) -> base.FragmentOut
+skybox :: proc(in_frag : base.FragmentIn, tick : f32) -> base.FragmentOut
 {
     sample := base.sample_texture(in_frag.tex, in_frag.uv.x, in_frag.uv.y)
     red_tint : base.Color = {math.sin(tick * 0.001) * 1.0, math.cos(tick * 0.005) * 0.5, 0.05, 1.0}
-    depth : f32 = in_frag.depth
+    depth : f32 = 0.999
     return {sample * in_frag.color * red_tint, depth, false}
 }
 
@@ -70,6 +70,7 @@ run :: proc(program : Program)
         program.render_height, 
         program.frame_target,
         program.title,
+        true,
     )
     defer display.close(d)
 
@@ -79,7 +80,8 @@ run :: proc(program : Program)
     //model := asset.load2(&asset_manager, "assets/Sponza/gltf/Sponza.gltf")
     //model := asset.load2(&asset_manager, "assets/Untitled.glb", ccw_winding=false)
     //model := asset.load2(&asset_manager, "assets/ABeautifulGame.glb", ccw_winding=false)
-    model2 := asset.load2(&asset_manager, "assets/leon.glb")
+    model := asset.load2(&asset_manager, "assets/leon.glb")
+    model2 := asset.load2(&asset_manager, "assets/test_skybox.glb")
     //model := asset.load2(&asset_manager, "assets/VirtualCity.glb")
        
     r : Renderer = renderer.create(program.render_width, program.render_height, &spall_ctx, &spall_buffer)
@@ -88,7 +90,7 @@ run :: proc(program : Program)
     camera := base.create_camera(
         {20,-20,20}, {0,0,0}, 3.14*0.5, 
         f32(program.render_width)/f32(program.render_height),
-        0.001, 2000.0
+        1.0, 2000.0
     )
 
     trs_matrix : matrix[4,4]f32 = linalg.matrix4_scale_f32({1.5, 1.5, 1.5})
@@ -109,20 +111,16 @@ run :: proc(program : Program)
 
         view_proj := base.get_view_projection(&camera)
 
-        
-        for i in 0..<1
-        {
-            for j in 0..<1
-            {
-                translation := base.translate({f32(i * 15), 0, -f32(j * 15)}, trs_matrix)
-                renderer.set_fragment_pipeline(&r, tint_and_depth)
-                //renderer.draw_model(&r, model, translation, view_proj)
-                renderer.reset_fragment_pipeline(&r)
-                renderer.set_vertex_pipeline(&r, wobbly)
-                renderer.draw_model(&r, model2, translation, view_proj)
-                renderer.reset_vertex_pipeline(&r)
-            }
-        }
+
+        translation := base.translate({0, 0, 0}, trs_matrix)
+        //renderer.set_vertex_pipeline(&r, wobbly)
+        renderer.draw_model(&r, model, translation, view_proj)
+        renderer.set_fragment_pipeline(&r, skybox)
+        translation = base.translate(camera.position, trs_matrix)
+        renderer.draw_model(&r, model2, translation, view_proj)
+        renderer.reset_fragment_pipeline(&r)
+        //renderer.reset_vertex_pipeline(&r)
+
         
 
         renderer.end_draw(&r)

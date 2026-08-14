@@ -38,18 +38,13 @@ load2 :: proc(manager : ^Manager, filepath_str : string, y_up : bool = true, ccw
     model := new(base.Model)
     
     total_primitives := 0
-    log.debug("one")
     for &node in data.nodes 
     {
-        log.debug("two")
         if node.mesh != nil 
         {
-            log.debug("three")
             total_primitives += len(node.mesh.primitives)
         }
-        log.debug("four")
     }
-    log.debug("five")
     
     // allocate textures based on the number of IMAGES, not materials.
     num_textures := len(data.images)

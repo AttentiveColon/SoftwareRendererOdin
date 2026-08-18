@@ -238,7 +238,7 @@ draw_triangle_tile :: proc(renderer : ^Renderer, tri : base.RasterTriangle, tile
                 pixel_depth : f32 = (z0 * alpha) + (z1 * beta) + (z2 * gamma)
                 buffer_index : int = row_offset + x
 
-                if pixel_depth < renderer.depthbuffer[buffer_index]
+                if pixel_depth <= renderer.depthbuffer[buffer_index]
                 {
                     light_color : base.Color = (c0 * alpha) + (c1 * beta) + (c2 * gamma)
 
@@ -257,7 +257,7 @@ draw_triangle_tile :: proc(renderer : ^Renderer, tri : base.RasterTriangle, tile
                     }
 
                     frag_out : base.FragmentOut = tri.frag_proc(frag_in, renderer.tick)
-                    if !frag_out.discard && frag_out.depth < renderer.depthbuffer[buffer_index]
+                    if !frag_out.discard && frag_out.depth <= renderer.depthbuffer[buffer_index]
                     {
                         renderer.depthbuffer[buffer_index] = frag_out.depth
                         renderer.framebuffer[buffer_index] = base.to_uint32_color(frag_out.color)
@@ -572,9 +572,52 @@ clear_depth_buffer :: proc(renderer : ^Renderer)
     slice.fill(renderer.depthbuffer, 1.0)
 }
 
+apply_fog :: proc(framebuffer : []u32, depthbuffer : []f32, fog_color : base.Color) -> []u32
+{
+    if len(framebuffer) != len(depthbuffer)
+    {
+        log.fatal("Framebuffer/Depthbuffer length mismatch!")
+        return {}
+    }
+    result_framebuffer := make([]u32, len(framebuffer), context.temp_allocator)
+    for i in 0..<len(framebuffer)
+    {
+        color := base.to_color_from_uint32(framebuffer[i])
+        depth := depthbuffer[i]
+        depth_pow := math.pow(depth, 20)
+        final_color := math.lerp(color, fog_color, depth_pow)
+        result_framebuffer[i] = base.to_uint32_color(final_color)
+    }
+    return result_framebuffer
+}
+
 get_framebuffer :: proc(renderer : ^Renderer) -> []u32
 {
     return renderer.framebuffer
+}
+
+get_depthbuffer :: proc(renderer : ^Renderer) -> []f32
+{
+    return renderer.depthbuffer
+}
+
+get_depthbuffer_as_framebuffer :: proc(renderer : ^Renderer) -> []u32
+{
+    depthbuffer_grayscale := make([]u32, len(renderer.depthbuffer), context.temp_allocator)
+    for pixel, i in renderer.depthbuffer
+    {
+        if pixel == 1.0
+        {
+            depthbuffer_grayscale[i] = 0x550000FF
+        }
+        else
+        {
+
+            scaled_pixel := math.pow(pixel, 100)
+            depthbuffer_grayscale[i] = base.to_uint32_color({scaled_pixel, scaled_pixel, scaled_pixel, 1.0})
+        }
+    }
+    return depthbuffer_grayscale
 }
 
 close :: proc(renderer : ^Renderer)

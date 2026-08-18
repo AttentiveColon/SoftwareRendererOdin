@@ -39,7 +39,7 @@ create_program :: proc() -> Program
         220 * render_scale,     // render height                
         320 * window_scale,     // window width
         240 * window_scale,     // window height
-        0,                      // frame target (0 for uncapped)
+        30,                      // frame target (0 for uncapped)
         "Odin Software Renderer"// window title
     }
 }
@@ -56,9 +56,9 @@ wobbly :: proc(v : base.Vertex, time : f32) -> base.Vertex
 skybox :: proc(in_frag : base.FragmentIn, tick : f32) -> base.FragmentOut
 {
     sample := base.sample_texture(in_frag.tex, in_frag.uv.x, in_frag.uv.y)
-    red_tint : base.Color = {math.sin(tick * 0.001) * 1.0, math.cos(tick * 0.005) * 0.5, 0.05, 1.0}
-    depth : f32 = 0.999
-    return {sample * in_frag.color * red_tint, depth, false}
+    red_tint : base.Color = {math.clamp(math.sin(tick * 0.001) * 1.0, 0.5, 1.0), math.clamp(math.cos(tick * 0.005) * 0.5, 0.5, 1.0), 0.5, 1.0}
+    depth : f32 = 1.0
+    return {sample * red_tint, depth, false}
 }
 
 run :: proc(program : Program)
@@ -88,9 +88,9 @@ run :: proc(program : Program)
     defer renderer.close(&r)
 
     camera := base.create_camera(
-        {20,-20,20}, {0,0,0}, 3.14*0.5, 
+        {20,-20,20}, {0,0,0}, 3.14*0.3335, 
         f32(program.render_width)/f32(program.render_height),
-        1.0, 2000.0
+        1.0, 600.0
     )
 
     trs_matrix : matrix[4,4]f32 = linalg.matrix4_scale_f32({1.5, 1.5, 1.5})
@@ -106,25 +106,36 @@ run :: proc(program : Program)
         renderer.clear_buffer(&r, {1.0, 0.0, 1.0, 1.0})
         renderer.begin_draw(&r)
 
-        direction, delta := base.process_input(0.1)
+        direction, delta := base.process_input(5.5)
         base.move_camera(&camera, direction, delta)
 
         view_proj := base.get_view_projection(&camera)
 
 
         translation := base.translate({0, 0, 0}, trs_matrix)
-        //renderer.set_vertex_pipeline(&r, wobbly)
-        renderer.draw_model(&r, model, translation, view_proj)
-        renderer.set_fragment_pipeline(&r, skybox)
+        for i in 0..<150
+        {
+            for j in 0..<5
+            {
+                translation = base.translate({f32(j * 150), 0, -f32(i * 150)}, trs_matrix)
+                renderer.draw_model(&r, model, translation, view_proj)
+
+            }
+
+        }
         translation = base.translate(camera.position, trs_matrix)
-        renderer.draw_model(&r, model2, translation, view_proj)
-        renderer.reset_fragment_pipeline(&r)
-        //renderer.reset_vertex_pipeline(&r)
+        // renderer.set_fragment_pipeline(&r, skybox)
+        // renderer.set_vertex_pipeline(&r, wobbly)
+        // renderer.draw_model(&r, model2, translation, view_proj)
+        // renderer.reset_fragment_pipeline(&r)
+        // renderer.reset_vertex_pipeline(&r)
 
         
 
         renderer.end_draw(&r)
-        if display.present(d, renderer.get_framebuffer(&r)) {break}
+        post_process_framebuffer := renderer.apply_fog(renderer.get_framebuffer(&r), renderer.get_depthbuffer(&r), base.Color{0.3, 0.3, 0.3, 1.0})
+        if display.present(d, post_process_framebuffer) {break}
+        //if display.present(d, renderer.get_depthbuffer_as_framebuffer(&r)) {break}
     }
 }
 

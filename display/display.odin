@@ -115,6 +115,7 @@ present :: proc(display : Display, framebuffer : []u32) -> bool
     @static last_time : f64
     @static fps_timer : f64
     @static frame_count : f64
+    should_close := false
     if last_time == 0.0
     {
         last_time = f64(sdl2.GetPerformanceCounter()) / f64(sdl2.GetPerformanceFrequency())
@@ -124,7 +125,7 @@ present :: proc(display : Display, framebuffer : []u32) -> bool
     if display.render_width * display.render_height != i32(len(framebuffer))
     {
         log.fatal("Render target mismatch!")
-        return false
+        should_close = true
     }
 
     if display.hardware_render // take hardware accelerated path
@@ -137,7 +138,7 @@ present :: proc(display : Display, framebuffer : []u32) -> bool
     }
     else // take software accelerated path
     {
-
+        
         // convert framebuffer into surface
         src_surface := sdl2.CreateRGBSurfaceWithFormatFrom(
             raw_data(framebuffer),
@@ -151,7 +152,7 @@ present :: proc(display : Display, framebuffer : []u32) -> bool
         if src_surface == nil
         {
             log.fatalf("Failed to create surface from framebuffer: %s", sdl2.GetError())
-            return false
+            should_close = true
         }
         defer sdl2.FreeSurface(src_surface)
         
@@ -164,7 +165,6 @@ present :: proc(display : Display, framebuffer : []u32) -> bool
     }
 
     // sdl requires polling in main thread
-    should_close := false
     event : sdl2.Event
     for sdl2.PollEvent(&event)
     {

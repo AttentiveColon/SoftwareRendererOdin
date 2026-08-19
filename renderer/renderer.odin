@@ -584,7 +584,7 @@ apply_fog :: proc(framebuffer : []u32, depthbuffer : []f32, fog_color : base.Col
     {
         color := base.to_color_from_uint32(framebuffer[i])
         depth := depthbuffer[i]
-        depth_pow := math.pow(depth, 20)
+        depth_pow := math.pow(depth, 100)
         final_color := math.lerp(color, fog_color, depth_pow)
         result_framebuffer[i] = base.to_uint32_color(final_color)
     }

@@ -122,6 +122,9 @@ load2 :: proc(manager : ^Manager, filepath_str : string, y_up : bool = true, ccw
         }
     }
 
+    // track max squared distance for all vertices
+    max_dist_sq: f32 = 0.0
+
     // process nodes and texture indicies
     mesh_idx := 0
     for n in 0..<len(data.nodes) 
@@ -207,6 +210,13 @@ load2 :: proc(manager : ^Manager, filepath_str : string, y_up : bool = true, ccw
                 
                 if y_up { y = -y }
                 if ccw_winding { temp := x; x = z; z = temp }
+
+                // updated max squared distance from origin
+                dist_sq := x*x + y*y + z*z
+                if dist_sq > max_dist_sq
+                {
+                    max_dist_sq = dist_sq
+                }
                 
                 nx, ny, nz : f32
                 if norm_acc != nil 
@@ -248,6 +258,7 @@ load2 :: proc(manager : ^Manager, filepath_str : string, y_up : bool = true, ccw
             mesh_idx += 1
         }
     }
+    model.bounding_radius = math.sqrt(max_dist_sq)
     return model
 }
 

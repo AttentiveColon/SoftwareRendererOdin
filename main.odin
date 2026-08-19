@@ -39,7 +39,7 @@ create_program :: proc() -> Program
         220 * render_scale,     // render height                
         320 * window_scale,     // window width
         240 * window_scale,     // window height
-        30,                      // frame target (0 for uncapped)
+        0,                      // frame target (0 for uncapped)
         "Odin Software Renderer"// window title
     }
 }
@@ -106,19 +106,25 @@ run :: proc(program : Program)
         renderer.clear_buffer(&r, {1.0, 0.0, 1.0, 1.0})
         renderer.begin_draw(&r)
 
-        direction, delta := base.process_input(5.5)
+        direction, delta := base.process_input(2.5)
         base.move_camera(&camera, direction, delta)
 
         view_proj := base.get_view_projection(&camera)
+        frustum := base.extract_frustum(view_proj)
 
 
         translation := base.translate({0, 0, 0}, trs_matrix)
-        for i in 0..<150
+        draw_count := 0
+        for i in 0..<500
         {
-            for j in 0..<5
+            for j in 0..<15
             {
                 translation = base.translate({f32(j * 150), 0, -f32(i * 150)}, trs_matrix)
-                renderer.draw_model(&r, model, translation, view_proj)
+                if base.is_in_frustum(&frustum, translation, {0,0,0}, model.bounding_radius)
+                {
+                    renderer.draw_model(&r, model, translation, view_proj)
+                    draw_count += 1
+                }
 
             }
 
@@ -135,6 +141,7 @@ run :: proc(program : Program)
         renderer.end_draw(&r)
         post_process_framebuffer := renderer.apply_fog(renderer.get_framebuffer(&r), renderer.get_depthbuffer(&r), base.Color{0.3, 0.3, 0.3, 1.0})
         if display.present(d, post_process_framebuffer) {break}
+        log.debug("Models Drawn: ", draw_count)
         //if display.present(d, renderer.get_depthbuffer_as_framebuffer(&r)) {break}
     }
 }

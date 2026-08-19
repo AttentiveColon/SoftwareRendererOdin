@@ -115,6 +115,7 @@ Model :: struct
     meshes : []NewMesh,
     textures : []Texture,
     tex_to_mesh_index : []int,
+    bounding_radius : f32,
 }
 
 destroy_mesh :: proc(mesh : ^Mesh)

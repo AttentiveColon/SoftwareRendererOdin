@@ -48,7 +48,7 @@ create_program :: proc() -> Program
 wobbly :: proc(v : base.Vertex, time : f32) -> base.Vertex
 {
     vertex := v
-    vertex.x += math.sin(time * 0.0005 * vertex.y) * 0.250
+    vertex.x += math.sin(time * 0.0005 * vertex.y) * 2.250
     return vertex
 }
 
@@ -83,6 +83,10 @@ run :: proc(program : Program)
     model := asset.load2(&asset_manager, "assets/leon.glb")
     model2 := asset.load2(&asset_manager, "assets/test_skybox.glb")
     //model := asset.load2(&asset_manager, "assets/VirtualCity.glb")
+
+    entity := base.create_entity(model)
+    entity_skybox := base.create_entity(model2)
+    entity_skybox.scale = {10, 10, 10}
        
     r : Renderer = renderer.create(program.render_width, program.render_height, &spall_ctx, &spall_buffer)
     defer renderer.close(&r)
@@ -90,19 +94,17 @@ run :: proc(program : Program)
     camera := base.create_camera(
         {20,-20,20}, {0,0,0}, 3.14*0.3335, 
         f32(program.render_width)/f32(program.render_height),
-        1.0, 600.0
+        1.0, 1200.0
     )
 
-    trs_matrix : matrix[4,4]f32 = linalg.matrix4_scale_f32({1.5, 1.5, 1.5})
-    mvp_matrix : matrix[4,4]f32 = camera.proj_matrix * camera.view_matrix * trs_matrix
+    //trs_matrix : matrix[4,4]f32 = linalg.matrix4_scale_f32({1.5, 1.5, 1.5})
+    //mvp_matrix : matrix[4,4]f32 = camera.proj_matrix * camera.view_matrix * trs_matrix
     renderer.update_light_position(&r, {100, -15, 0})
-    model_matricies := make([dynamic]matrix[4,4]f32)
 
     //frame : f32 = 0.0
     for 
     {   
         free_all(context.temp_allocator)
-        clear(&model_matricies)
         renderer.clear_buffer(&r, {1.0, 0.0, 1.0, 1.0})
         renderer.begin_draw(&r)
 
@@ -113,41 +115,48 @@ run :: proc(program : Program)
         frustum := base.extract_frustum(view_proj)
 
 
-        translation := base.translate({0, 0, 0}, trs_matrix)
+        //translation := base.translate({0, 0, 0}, trs_matrix)
         draw_count := 0
         for i in 0..<500
         {
             for j in 0..<15
             {
-                translation = base.translate({f32(j * 150), 0, -f32(i * 150)}, trs_matrix)
-                if base.is_in_frustum(&frustum, translation, {0,0,0}, model.bounding_radius)
+                //translation = base.translate({f32(j * 150), 0, -f32(i * 150)}, trs_matrix)
+                entity.position = {f32(j * 150), 0, -f32(i * 150)}
+                entity_matrix := base.get_entity_matrix(&entity)
+                if base.is_in_frustum(&frustum, entity_matrix, model.bounding_center, model.bounding_radius)
                 {
-                    renderer.draw_model(&r, model, translation, view_proj)
+                    renderer.draw_entity(&r, &entity, view_proj)
+                    //renderer.draw_model(&r, model, entity_matrix, view_proj)
                     draw_count += 1
                 }
 
             }
 
         }
-        translation = base.translate(camera.position, trs_matrix)
-        // renderer.set_fragment_pipeline(&r, skybox)
-        // renderer.set_vertex_pipeline(&r, wobbly)
-        // renderer.draw_model(&r, model2, translation, view_proj)
-        // renderer.reset_fragment_pipeline(&r)
-        // renderer.reset_vertex_pipeline(&r)
+        renderer.set_fragment_pipeline(&r, skybox)
+        renderer.set_vertex_pipeline(&r, wobbly)
+        entity_skybox.position = camera.position
+        skybox_matrix := base.get_entity_matrix(&entity_skybox)
+        renderer.draw_entity(&r, &entity_skybox, view_proj)
+        //renderer.draw_model(&r, model2, translation, view_proj)
+        renderer.reset_fragment_pipeline(&r)
+        renderer.reset_vertex_pipeline(&r)
 
         
 
         renderer.end_draw(&r)
-        post_process_framebuffer := renderer.apply_fog(renderer.get_framebuffer(&r), renderer.get_depthbuffer(&r), base.Color{0.3, 0.3, 0.3, 1.0})
-        if display.present(d, post_process_framebuffer) {break}
-        log.debug("Models Drawn: ", draw_count)
+        if display.present(d, renderer.get_framebuffer(&r)) {break}
+        //post_process_framebuffer := renderer.apply_fog(renderer.get_framebuffer(&r), renderer.get_depthbuffer(&r), base.Color{0.3, 0.3, 0.3, 1.0})
+        //if display.present(d, post_process_framebuffer) {break}
+        //log.debug("Models Drawn: ", draw_count)
         //if display.present(d, renderer.get_depthbuffer_as_framebuffer(&r)) {break}
     }
 }
 
 main :: proc()
 {
+    
     spall_ctx = spall.context_create("renderer_trace.spall")
     defer spall.context_destroy(&spall_ctx)
     buffer_backing := make([]u8, spall.BUFFER_DEFAULT_SIZE)

@@ -1,5 +1,7 @@
 package base
 
+import la "core:math/linalg"
+
 V4 :: [4]f32
 V3 :: [3]f32
 V2 :: [2]f32
@@ -116,6 +118,14 @@ Model :: struct
     textures : []Texture,
     tex_to_mesh_index : []int,
     bounding_radius : f32,
+    bounding_center : V3,
+}
+
+destroy_model :: proc(model : ^Model)
+{
+    delete(model.meshes)
+    delete(model.textures)
+    delete(model.tex_to_mesh_index)
 }
 
 destroy_mesh :: proc(mesh : ^Mesh)
@@ -131,6 +141,32 @@ destroy_mesh :: proc(mesh : ^Mesh)
         unload_texture(&mat.texture)
     }
     delete(mesh.materials)
+}
+
+Entity :: struct
+{
+    position : V3,
+    rotation : quaternion128,
+    scale : V3,
+    model : ^Model,
+}
+
+create_entity :: proc(model : ^Model) -> Entity
+{
+    entity : Entity
+    entity.model = model
+    entity.scale = {1, 1, 1}
+    return entity
+}
+
+get_entity_matrix :: proc(entity : ^Entity) -> M4
+{
+    return la.matrix4_from_trs_f32(entity.position, entity.rotation, entity.scale)
+}
+
+destroy_entity :: proc(entity : ^Entity)
+{
+    destroy_model(entity.model)
 }
 
 RasterVertex :: struct

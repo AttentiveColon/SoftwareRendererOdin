@@ -503,6 +503,11 @@ draw_model :: proc(renderer : ^Renderer, model : ^base.Model, model_matrix, view
 
 }
 
+draw_entity :: proc(renderer : ^Renderer, entity : ^base.Entity, view_proj : base.M4)
+{
+    draw_model(renderer, entity.model, base.get_entity_matrix(entity), view_proj)
+}
+
 begin_draw :: proc(renderer : ^Renderer)
 {
     clear(&renderer.textures)
@@ -582,8 +587,8 @@ apply_fog :: proc(framebuffer : []u32, depthbuffer : []f32, fog_color : base.Col
     result_framebuffer := make([]u32, len(framebuffer), context.temp_allocator)
     for i in 0..<len(framebuffer)
     {
-        color := base.to_color_from_uint32(framebuffer[i])
         depth := depthbuffer[i]
+        color := base.to_color_from_uint32(framebuffer[i])
         depth_pow := math.pow(depth, 100)
         final_color := math.lerp(color, fog_color, depth_pow)
         result_framebuffer[i] = base.to_uint32_color(final_color)

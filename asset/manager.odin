@@ -122,8 +122,9 @@ load2 :: proc(manager : ^Manager, filepath_str : string, y_up : bool = true, ccw
         }
     }
 
-    // track max squared distance for all vertices
-    max_dist_sq: f32 = 0.0
+    // track extents of x, y, z values
+    min_bounds := [3]f32{math.F32_MAX, math.F32_MAX, math.F32_MAX}
+    max_bounds := [3]f32{-math.F32_MAX, -math.F32_MAX, -math.F32_MAX}
 
     // process nodes and texture indicies
     mesh_idx := 0
@@ -211,12 +212,14 @@ load2 :: proc(manager : ^Manager, filepath_str : string, y_up : bool = true, ccw
                 if y_up { y = -y }
                 if ccw_winding { temp := x; x = z; z = temp }
 
-                // updated max squared distance from origin
-                dist_sq := x*x + y*y + z*z
-                if dist_sq > max_dist_sq
-                {
-                    max_dist_sq = dist_sq
-                }
+                // update min and max extents
+                min_bounds.x = math.min(min_bounds.x, x)
+                min_bounds.y = math.min(min_bounds.y, y)
+                min_bounds.z = math.min(min_bounds.z, z)
+
+                max_bounds.x = math.max(max_bounds.x, x)
+                max_bounds.y = math.max(max_bounds.y, y)
+                max_bounds.z = math.max(max_bounds.z, z)
                 
                 nx, ny, nz : f32
                 if norm_acc != nil 
@@ -258,7 +261,12 @@ load2 :: proc(manager : ^Manager, filepath_str : string, y_up : bool = true, ccw
             mesh_idx += 1
         }
     }
-    model.bounding_radius = math.sqrt(max_dist_sq)
+    
+    // calculate midpoint and minimum enclosing sphere
+    model.bounding_center = (min_bounds + max_bounds) * 0.5
+    extent := max_bounds - model.bounding_center
+    model.bounding_radius = math.sqrt(extent.x * extent.x + extent.y * extent.y + extent.z * extent.z)
+
     return model
 }
 

@@ -503,9 +503,13 @@ draw_model :: proc(renderer : ^Renderer, model : ^base.Model, model_matrix, view
 
 }
 
-draw_entity :: proc(renderer : ^Renderer, entity : ^base.Entity, view_proj : base.M4)
+draw_entity :: proc(renderer : ^Renderer, entity : ^base.Entity, camera : ^base.Camera)
 {
-    draw_model(renderer, entity.model, base.get_entity_matrix(entity), view_proj)
+    model_matrix := base.get_entity_matrix(entity)
+    if base.is_in_frustum(&camera.frustum, model_matrix, entity.model.bounding_center, entity.model.bounding_radius)
+    {
+        draw_model(renderer, entity.model, base.get_entity_matrix(entity), camera.view_proj)
+    }
 }
 
 begin_draw :: proc(renderer : ^Renderer)

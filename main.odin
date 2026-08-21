@@ -97,8 +97,6 @@ run :: proc(program : Program)
         1.0, 1200.0
     )
 
-    //trs_matrix : matrix[4,4]f32 = linalg.matrix4_scale_f32({1.5, 1.5, 1.5})
-    //mvp_matrix : matrix[4,4]f32 = camera.proj_matrix * camera.view_matrix * trs_matrix
     renderer.update_light_position(&r, {100, -15, 0})
 
     //frame : f32 = 0.0
@@ -109,28 +107,14 @@ run :: proc(program : Program)
         renderer.begin_draw(&r)
 
         direction, delta := base.process_input(2.5)
-        base.move_camera(&camera, direction, delta)
+        base.update_camera(&camera, direction, delta)
 
-        view_proj := base.get_view_projection(&camera)
-        frustum := base.extract_frustum(view_proj)
-
-
-        //translation := base.translate({0, 0, 0}, trs_matrix)
-        draw_count := 0
         for i in 0..<500
         {
             for j in 0..<15
             {
-                //translation = base.translate({f32(j * 150), 0, -f32(i * 150)}, trs_matrix)
                 entity.position = {f32(j * 150), 0, -f32(i * 150)}
-                entity_matrix := base.get_entity_matrix(&entity)
-                if base.is_in_frustum(&frustum, entity_matrix, model.bounding_center, model.bounding_radius)
-                {
-                    renderer.draw_entity(&r, &entity, view_proj)
-                    //renderer.draw_model(&r, model, entity_matrix, view_proj)
-                    draw_count += 1
-                }
-
+                renderer.draw_entity(&r, &entity, &camera)
             }
 
         }
@@ -138,8 +122,7 @@ run :: proc(program : Program)
         renderer.set_vertex_pipeline(&r, wobbly)
         entity_skybox.position = camera.position
         skybox_matrix := base.get_entity_matrix(&entity_skybox)
-        renderer.draw_entity(&r, &entity_skybox, view_proj)
-        //renderer.draw_model(&r, model2, translation, view_proj)
+        renderer.draw_entity(&r, &entity_skybox, &camera)
         renderer.reset_fragment_pipeline(&r)
         renderer.reset_vertex_pipeline(&r)
 

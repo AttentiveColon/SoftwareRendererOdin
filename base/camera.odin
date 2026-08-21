@@ -9,6 +9,8 @@ Camera :: struct
     position, look_at, up : V3,
     fov, aspect, near, far : f32,
     yaw, pitch : f32,
+    view_proj : M4,
+    frustum : Frustum,
 }
 
 Frustum :: [6][4]f32
@@ -23,7 +25,17 @@ create_camera :: proc(position, look_at : V3, fov, aspect, near, far : f32) -> C
     pitch := math.asin(forward.y)
     yaw := math.atan2(forward.z, forward.x)
 
-    return {view_matrix, proj_matrix, position, look_at, up, fov, aspect, near, far, yaw, pitch}
+    view_proj := proj_matrix * view_matrix
+    frustum := extract_frustum(view_proj)
+
+    return {view_matrix, proj_matrix, position, look_at, up, fov, aspect, near, far, yaw, pitch, view_proj, frustum}
+}
+
+update_camera :: proc(camera : ^Camera, move_delta : V3, mouse_delta : V2)
+{
+    move_camera(camera, move_delta, mouse_delta)
+    camera.view_proj = camera.proj_matrix * camera.view_matrix
+    camera.frustum = extract_frustum(camera.view_proj)
 }
 
 move_camera :: proc(camera : ^Camera, move_delta : V3, mouse_delta : V2)

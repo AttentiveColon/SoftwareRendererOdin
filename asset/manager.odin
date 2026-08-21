@@ -50,7 +50,7 @@ load2 :: proc(manager : ^Manager, filepath_str : string, y_up : bool = true, ccw
     num_textures := len(data.images)
     if num_textures == 0 { num_textures = 1 } // if no images found, set to 1 for a fallback
 
-    model.meshes = make([]base.NewMesh, total_primitives, context.allocator)
+    model.meshes = make([]base.Mesh, total_primitives, context.allocator)
     model.textures = make([]base.Texture, num_textures, context.allocator)
     model.tex_to_mesh_index = make([]int, total_primitives, context.allocator)
 

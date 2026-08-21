@@ -6,7 +6,7 @@ import "core:strconv"
 import "core:log"
 
 
-load_obj :: proc(obj_filepath : string) -> Mesh
+load_obj :: proc(obj_filepath : string) -> OldMesh
 {
     current_material := ""
     start_face_index := 0
@@ -93,7 +93,7 @@ load_obj :: proc(obj_filepath : string) -> Mesh
         append(&face_groups, FaceGroup{len(faces) - 1, current_material})
     }
     
-    return Mesh{final_verticies[:], faces[:], materials, face_groups[:]}
+    return OldMesh{final_verticies[:], faces[:], materials, face_groups[:]}
 }
 
 load_materials :: proc(mtl_filepath : string) -> map[string]Material

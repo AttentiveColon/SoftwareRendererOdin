@@ -99,7 +99,7 @@ FaceGroup :: struct
     material_name : string,
 }
 
-Mesh :: struct
+OldMesh :: struct
 {
     vertices : []Vertex,
     faces : []Face,
@@ -107,14 +107,14 @@ Mesh :: struct
     face_groups : []FaceGroup,
 }
 
-NewMesh :: struct
+Mesh :: struct
 {
     verticies : []Vertex,
 }
 
 Model :: struct
 {
-    meshes : []NewMesh,
+    meshes : []Mesh,
     textures : []Texture,
     tex_to_mesh_index : []int,
     bounding_radius : f32,
@@ -128,7 +128,7 @@ destroy_model :: proc(model : ^Model)
     delete(model.tex_to_mesh_index)
 }
 
-destroy_mesh :: proc(mesh : ^Mesh)
+destroy_mesh :: proc(mesh : ^OldMesh)
 {
     delete(mesh.vertices)
     delete(mesh.faces)
